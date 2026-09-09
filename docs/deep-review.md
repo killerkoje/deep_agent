@@ -68,19 +68,25 @@ Brownfield(기존 CRM 등): OpenSpec으로 구멍 스캔 → Spec Kit 형식(선
 
 ## 5. 이 레포 설계에 대한 코멘트
 
+캐노니컬 파이프라인은 README §1 기준:
+
+`PRD(사람) → SPEC(AI+보일러) → 질문툴(AI) → 답(사람) → 재검토(AI) → Impl(AI) → QA(AI) → 메인 토탈 보고`
+
+별도 Tech Plan 게이트는 두지 않는다. 스택은 기존 레포 컨벤션 / SPEC·PRD에 이미 고정.
+
 **유지**
 
-- Verify → Tech Plan → Impl → QA 분리  
+- 질문 추출 · 사람 답 · 재검토 분리 (3→4→5)  
 - 빈 칸 사람 답변, AI 추정 금지  
-- What(스펙) ≠ How(스택)  
-- Writer ≠ Reviewer (QA 별 워커)
+- Writer ≠ Reviewer (QA 별 워커)  
+- 메인 = 라우팅 + 최종 보고
 
-**조정**
+**투자 우선**
 
-1. Phase 1 우선순위: 이벤트 버스보다 **구멍 taxonomy + 멀티툴 Verify + 교차규칙 패스 + fail-closed 검사**  
-2. `*.passed`는 라벨이 아니라 스크립트/훅이 검증한 결과여야 한다  
-3. QA = 인수조건 조항 ID → 체크/테스트 증거 매핑  
-4. 멀티플렉서는 단순 허브로 두고, 제품 차별화는 Verify에 둔다
+1. 구멍 taxonomy + REVIEW-PROMPT + fail-closed PASS  
+2. 질문지 md 계약  
+3. QA 조항↔증거 + 토탈 보고  
+4. 이벤트 버스는 그 다음
 
 ---
 
