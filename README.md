@@ -2,9 +2,11 @@
 
 > AI 에이전트 멀티플렉서 — PRD(사람) 이후 SPEC부터 구현·QA까지 오케스트레이션한다.  
 > 목표는 **순수 Deep Agents**: **최상위 Main이 매 턴 무엇을 할지, 어떤 모델을 호출할지 스스로 정한다.**  
-> 역할→모델 고정표는 없다. SDD 게이트만 하드 제약으로 남긴다.
+> 역할→모델 고정표는 없다. SDD 게이트만 하드 제약으로 남긴다.  
+> **런타임:** 서버 상주 · **Python / FastAPI · 자체 `tick` 루프** · **LangGraph 사용 안 함**.
 
-**Status:** Draft / Research  
+**Status:** Draft / Spec’d  
+**구현 계약:** [`docs/SPEC.md`](docs/SPEC.md) ← 개발은 이 문서 기준  
 **Repo:** [heh139811-droid/work_flow_ochestration_agent](https://github.com/heh139811-droid/work_flow_ochestration_agent)  
 **Local clone:** `C:\Users\PC\Documents\work_flow_ochestration_agent`
 
@@ -98,13 +100,15 @@ Main에게 **`spawn` / `call_model` 툴**을 주고, 매 턴 `tick` 루프를 �
 
 ### 0.5 구현 우선순위
 
-1. Main `tick` + Todo + `runs/{run_id}/`  
+1. Main `tick` + Todo + `runs/{run_id}/` (서버 FastAPI)  
 2. `spawn(skill, model, brief, tools, budget)` — **model은 Main 필수 인자**  
 3. 가용 모델 목록 API (키/엔드포인트만; 배치표 아님)  
 4. PASS 6항 **스크립트** 게이트  
 5. FAIL 시 재계획 + 모델 재선택을 감사 로그에 고정  
 
-스택 후보: Cursor Skills MVP → [LangGraph / `deepagents`](https://www.langchain.com/blog/deep-agents) 실험.
+**스택 (고정):** Python 3.11+ · FastAPI · 자체 tick/spawn · Docker 서버.  
+**사용하지 않음:** LangGraph, LangChain `deepagents`.  
+상세 구현 스펙·모듈 맵·API: [`docs/SPEC.md`](docs/SPEC.md).
 
 ---
 
@@ -371,12 +375,13 @@ QA 종료 후 메인이 런 전체를 요약한다.
 
 ### 7.1 오케스트레이션
 
-| 후보 | 메모 |
+| 항목 | 결정 |
 |------|------|
-| Cursor Skills + 상태 파일 + GH Issue/PR | 1차 MVP (수동 tick에 가깝) |
-| **LangGraph / [`deepagents`](https://www.langchain.com/blog/deep-agents)** | **목표 런타임** — Main 루프·모델 호출 spawn |
-| GitHub Actions | 라벨/`answers.ready` 트리거 |
-| Inngest / Temporal | 사람 대기가 길어질 때 |
+| **서버** | Docker/VM 상주 프로세스 (실운전) |
+| **앱** | FastAPI + 백그라운드 `tick` 루프 |
+| **엔진** | 자체 `tick` / `spawn` ([`docs/SPEC.md`](docs/SPEC.md) §8–9) |
+| **비사용** | LangGraph, `deepagents`, Temporal/Inngest (MVP) |
+| Cursor | 개발·디버그만. 실운전 런타임 아님 |
 
 ### 7.2 단계별 자리 (스킬 — 모델 미고정)
 
@@ -446,9 +451,9 @@ capabilities:
 - [x] [`docs/deep-review.md`](docs/deep-review.md)  
 - [x] 캐노니컬 파이프라인 1~8 (기본 경로)  
 - [x] Deep Agents: Main이 스킬·**모델** 자율 호출 (§0) — **모델 배치표 폐기**  
-- [ ] `docs/gates.md` + 이벤트 스키마  
-- [ ] `models.available` 스키마 (목록만)  
-- [ ] SPEC 보일러플레이트 템플릿  
+- [x] [`docs/SPEC.md`](docs/SPEC.md) — 구현 계약 (서버·FastAPI·No LangGraph)  
+- [x] [`docs/gates.md`](docs/gates.md) + [`schemas/`](schemas/)  
+- [x] SPEC 보일러플레이트 [`docs/templates/spec-boilerplate.md`](docs/templates/spec-boilerplate.md)
 
 ### Phase 1 — 수동 트리거 (게이트부터)
 
@@ -470,7 +475,7 @@ capabilities:
 
 - [ ] `prd.ready` → … → `qa.*` → `run.report.ready` 무인 루프 (사람 게이트만 대기)  
 - [ ] budget / 비용 상한 (모델 강제 배정 아님)  
-- [ ] LangGraph / `deepagents` 런타임 정착  
+- [ ] Dockerfile + volume + 서버 배포 고정
 
 ### Phase 4 — 확장
 
@@ -522,8 +527,8 @@ capabilities:
 
 ## 13. 다음 할 일
 
-1. SPEC 보일러플레이트 (`docs/templates/`)  
-2. `schemas/events.schema.json` + `models.available`  
+1. [`docs/SPEC.md`](docs/SPEC.md) §14 **S1** — FastAPI skeleton + `runs/` store  
+2. skills `SKILL.md` 5종 초안  
 3. Question Extractor ← REVIEW-PROMPT 바인딩  
-4. 토탈 보고 템플릿 (skill+model 이력) + 샘플 런 1건  
-5. Main `tick` / `spawn(skill, model, …)` / `runs/` 초안 구현 (Phase 2)  
+4. 게이트 단위 테스트 (`docs/gates.md` §8)  
+5. E2E 샘플 런 1건 (사람 답 1회 포함)  

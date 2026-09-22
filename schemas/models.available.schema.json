@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/heh139811-droid/work_flow_ochestration_agent/schemas/models.available.schema.json",
+  "title": "ModelsAvailable",
+  "description": "Catalog of callable models. MUST NOT map roles/skills to default models.",
+  "type": "object",
+  "required": ["models"],
+  "properties": {
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "provider"],
+        "properties": {
+          "id": { "type": "string" },
+          "provider": { "type": "string", "enum": ["openai", "anthropic", "other"] },
+          "display_name": { "type": "string" },
+          "currency": { "type": "string", "default": "usd" },
+          "input_per_1m": { "type": ["number", "null"] },
+          "output_per_1m": { "type": ["number", "null"] },
+          "notes": { "type": "string" }
+        },
+        "additionalProperties": false,
+        "not": {
+          "anyOf": [
+            { "required": ["default_for_skill"] },
+            { "required": ["role"] },
+            { "required": ["skills"] }
+          ]
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/heh139811-droid/work_flow_ochestration_agent/schemas/run-state.schema.json",
+  "title": "RunState",
+  "type": "object",
+  "required": [
+    "run_id",
+    "feature_id",
+    "status",
+    "verify_passed",
+    "spawn_history",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "run_id": { "type": "string" },
+    "feature_id": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["created", "running", "waiting_human", "failed", "completed"]
+    },
+    "phase": {
+      "type": ["string", "null"],
+      "description": "Hint only; gates do not trust this field"
+    },
+    "spec_hash": { "type": ["string", "null"] },
+    "verify_passed": { "type": "boolean" },
+    "last_event": { "type": ["string", "null"] },
+    "waiting_for": {
+      "type": ["string", "null"],
+      "enum": ["answers", "prd_revision", null]
+    },
+    "target_repo_path": { "type": ["string", "null"] },
+    "budget": {
+      "type": "object",
+      "properties": {
+        "max_usd": { "type": ["number", "null"] },
+        "spent_usd": { "type": "number", "default": 0 }
+      },
+      "additionalProperties": false
+    },
+    "spawn_history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["spawn_id", "skill", "model", "brief", "at"],
+        "properties": {
+          "spawn_id": { "type": "string" },
+          "skill": {
+            "type": "string",
+            "enum": [
+              "spec-write",
+              "question-extract",
+              "spec-rereview",
+              "implement",
+              "qa"
+            ]
+          },
+          "model": { "type": "string" },
+          "brief": { "type": "string" },
+          "at": { "type": "string", "format": "date-time" },
+          "result": { "type": ["string", "null"] },
+          "event": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "error": { "type": ["string", "null"] },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}
