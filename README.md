@@ -1,6 +1,8 @@
 # Workflow Orchestration Agent
 
-> AI 에이전트 멀티플렉서 — PRD(사람) 이후 SPEC부터 구현·QA까지 오케스트레이션한다.
+> AI 에이전트 멀티플렉서 — PRD(사람) 이후 SPEC부터 구현·QA까지 오케스트레이션한다.  
+> 목표는 **Deep Agent**: 상위 LLM이 루프에서 계획하고, 필요할 때 서브에이전트를 동적으로 띄우며, 파일시스템 작업공간에서 긴 작업을 파고든다.  
+> 지금은 그 목표를 향한 **SDD 골격(고정 게이트 + 역할 워커)** 초안이다.
 
 **Status:** Draft / Research  
 **Repo:** [heh139811-droid/work_flow_ochestration_agent](https://github.com/heh139811-droid/work_flow_ochestration_agent)  
@@ -8,7 +10,68 @@
 
 ---
 
+## 0. Deep Agent — 이름·현재·목표
+
+### 0.1 이 말이 어디서 왔나
+
+학계 고유 용어라기보다 [LangChain Deep Agents](https://www.langchain.com/blog/deep-agents)가 정리·패키징하며 퍼진 이름에 가깝다.  
+영감의 중심은 **Claude Code / Deep Research / Manus** 계열이고, “shallow 툴루프”와 대비해 다음 넷을 Deep의 조건으로 본다.
+
+1. **계획(Todo 등)**  
+2. **서브에이전트 위임**  
+3. **파일시스템(공유 작업공간)**  
+4. **자세한 시스템 프롬프트**
+
+Deep Agent의 핵심은 **상위가 일을 다 하는 것**이 아니라, 목표가 오면 역할을 쪼개 **서브에 시키고**, 자신은 위임·게이트·재시도·종합만 하는 것이다.
+
+### 0.2 지금 초안은 Deep Agent인가?
+
+**엄밀히는 반만.** 지금은 Deep Agent라기보다 **SDD 워크플로 오케스트레이터(멀티 에이전트 파이프라인)** 이다.
+
+| | 지금 (본 README 1~8절) | Deep Agent 목표 |
+|--|------------------------|-----------------|
+| 계획 | 단계가 거의 고정 레일 | Main이 매 턴 Todo·재계획 |
+| 서브 | Spec / Impl / QA 등 **고정 워커** | 필요 시 **동적 spawn** |
+| FS | md를 사람이 넘기는 계약 | `runs/{run_id}/`에 에이전트가 쓰고 공유 |
+| 상위 | `on_event → route(next)` 스위치에 가까움 | `tick(state) → plan \| spawn \| wait_human \| finish` 루프 |
+
+겹치는 것(메인은 일 안 함, 워커는 이벤트만, 하드 게이트)은 Deep **패턴**이고,  
+부족한 것(동적 계획·동적 스폰·FS 작업공간)을 붙이면 Deep Agent가 된다.
+
+### 0.3 모델 배치 (실험 정책)
+
+역할 기본값이다. Main이 비용·난이도에 따라 바꿀 수 있게 두는 것이 Deep 쪽이다.
+
+| 역할 | 모델 (가칭) | 하는 일 |
+|------|-------------|---------|
+| **Main** | Astra (최상위) | 루프·Todo·라우팅·게이트·재시도·토탈 보고. 스펙/코드 본문 금지 |
+| **Docs 서브** | Opus | SPEC·질문 추출·답 반영·재검토 (PRD 확정은 사람) |
+| **Impl 서브** | 5.6 sol | verified SPEC만 보고 구현·PR |
+| **QA 서브** | 5.6 sol | PRD+SPEC 대비 에러·엣지·증거. **Impl과 세션 분리** |
+
+모델만 번갈아 쓰는 것은 Deep가 아니다. **Astra가 Opus/Sol을 시키는 오케스트레이션**이어야 한다.
+
+### 0.4 Deep로 가려면 고도화할 것 (우선순위)
+
+1. **Main 루프 + Todo + run workspace** — 스위치를 `tick(state)`로  
+2. **동적 spawn 계약** — `spawn(role, brief, tools, budget)` + 스킬 레지스트리  
+3. **게이트 스크립트화** — PASS 6항 fail-closed (프롬프트 ≠ 게이트)  
+4. **모델 라우팅 정책** — 기본 Opus/Sol 유지, FAIL·난이도 시 escalation  
+
+**유지할 SDD 제약 (Deep이 되어도 안 풂)**
+
+- 빈 칸 추정 금지 · 질문 답은 사람  
+- `spec.verify.passed` 없이 Impl 불가  
+- QA ≠ Writer  
+- 워커는 다음 단계를 직접 호출하지 않음  
+
+SDD 게이트는 “항상 같은 레일”이 아니라 Deep 루프 안의 **제약**으로 남긴다.
+
+---
+
 ## 1. 캐노니컬 파이프라인 (이 레포의 진실)
+
+> Phase 0~1의 **SDD 골격**. Deep 루프가 붙어도 이 단계·산출물·게이트는 기본 경로이자 제약으로 남는다.
 
 | # | 단계 | 주체 | 산출물 |
 |---|------|------|--------|
@@ -57,7 +120,8 @@ PRD와 질문 답변(4)만 사람이다. 메인은 라우팅·게이트·최종 
 
 사람은 **PRD**와 **검수 질문 답**만 쓴다.  
 메인이 **SPEC → 질문툴 → (사람 답) → 재검토 → 구현 → QA**를 이어 붙인 뒤 **토탈 보고**한다.  
-빈 칸은 AI가 추정으로 메우지 않는다.
+빈 칸은 AI가 추정으로 메우지 않는다.  
+장기적으로 메인은 고정 레일이 아니라 **Deep 루프**가 되고, 위 파이프라인은 그 안의 SDD 제약·기본 경로가 된다.
 
 ---
 
@@ -68,8 +132,11 @@ PRD와 질문 답변(4)만 사람이다. 메인은 라우팅·게이트·최종 
               │  Main Orchestrator   │
               │  route / gate / audit│
               │  + final report      │
+              │  (목표: plan loop +  │
+              │   dynamic spawn)     │
               └──────────┬───────────┘
                          │ on_event → route(next)
+                         │ 목표: tick → plan | spawn | …
      ┌─────────┬─────────┼─────────┬─────────┬─────────┐
      ▼         ▼         ▼         ▼         ▼         ▼
   SpecWriter  Question  (Human)  SpecPatch  Impl      QA
@@ -247,7 +314,8 @@ QA 종료 후 메인이 런 전체를 요약한다.
 - **질문은 AI · 답은 사람** → SDD 계약 유지 (CRM 지표 실험과 동일)  
 - **3→4→5 분리** → 질문 추출 / 사람 답 / 반영·재검토를 섞지 않음  
 - **완료 이벤트** → 재실행·감사·사람 대기 삽입이 쉬움  
-- **메인은 일 안 함 + 마지막에만 보고** → 멀티플렉서 본분
+- **메인은 일 안 함 + 마지막에만 보고** → 멀티플렉서 본분 (Deep의 위임 패턴과 동일)  
+- **고정 파이프라인은 골격** → Deep 루프·동적 스폰은 그 위에 얹음  
 
 심층 검토·업계 레퍼런스: [`docs/deep-review.md`](docs/deep-review.md)
 
@@ -262,6 +330,7 @@ QA 종료 후 메인이 런 전체를 요약한다.
 | 후보 | 메모 |
 |------|------|
 | Cursor Skills + 상태 파일 + GH Issue/PR | 1차 MVP |
+| LangGraph / `deepagents` | Main 루프·서브스폰 실험 |
 | GitHub Actions | 라벨/`answers.ready` 트리거 |
 | Inngest / Temporal | 사람 대기가 길어질 때 |
 
@@ -269,13 +338,14 @@ QA 종료 후 메인이 런 전체를 요약한다.
 
 | 단계 | 후보 |
 |------|------|
-| 2 SPEC | SPEC 보일러플레이트 + Cursor/Claude |
+| Main | Astra — Todo + `tick` + spawn |
+| 2~5 Docs | Opus + SPEC 보일러 + REVIEW-PROMPT |
 | 3 질문 추출 | **REVIEW-PROMPT** + OpenSpec explore / Spec Kit clarify |
-| 5 재검토 | 동일 프롬프트 + PASS 6항 스크립트 |
-| 6 구현 | Cursor / Claude Code / Copilot Agent |
-| 7 QA | 인수조건 매핑 + (선택) OpenSpec `/opsx:verify` |
+| 5 재검토 | 동일 프롬프트 + PASS 6항 **스크립트** |
+| 6 구현 | 5.6 sol (Cursor / Claude Code 등) |
+| 7 QA | 5.6 sol — 인수조건 매핑 + (선택) OpenSpec `/opsx:verify` |
 
-메인이 단계별로 skill을 **라우팅**한다. 툴은 플러그인.
+메인이 단계별로 skill을 **라우팅**(이후 **동적 spawn**)한다. 툴은 플러그인.
 
 ### 7.3 디렉터리 스케치
 
@@ -295,6 +365,7 @@ QA 종료 후 메인이 런 전체를 요약한다.
 │   ├── spec-rereview/
 │   ├── implement/
 │   └── qa/
+├── runs/                   # Deep: run_id별 작업공간 (목표)
 ├── workflows/
 └── examples/
 ```
@@ -314,9 +385,13 @@ capabilities:
   - write_audit(run_id, event)
   - escalate(run_id, reason)
   - write_total_report(run_id)   # 단계 8
+  # Deep 목표
+  - tick(state) -> plan | spawn | wait_human | finish
+  - spawn(role, brief, tools, budget) -> worker_run
+  - update_todo(run_id, items)
 ```
 
-**하지 않는 것:** PRD 작성, 질문 답 추정, 검증 스킵 후 구현, QA 스킵 머지 승인.
+**하지 않는 것:** PRD 작성, 질문 답 추정, 검증 스킵 후 구현, QA 스킵 머지 승인, Main이 스펙/코드 본문을 직접 작성.
 
 ---
 
@@ -327,14 +402,15 @@ capabilities:
 - [x] 레포 / README  
 - [x] [`docs/deep-review.md`](docs/deep-review.md)  
 - [x] 캐노니컬 파이프라인 1~8 고정 (본 문서)  
+- [x] Deep Agent 목표·현재 위치·고도화 우선순위 (본 문서 §0)  
 - [ ] `docs/gates.md` + 이벤트 스키마  
 - [ ] SPEC 보일러플레이트 템플릿  
 
-### Phase 1 — 수동 트리거
+### Phase 1 — 수동 트리거 (SDD 골격)
 
 - [ ] REVIEW-PROMPT → Question Extractor skill  
 - [ ] `questions.md` / `answers.md` 계약 + `답:` 공란 검사  
-- [ ] 단계 5 PASS 6항 체크  
+- [ ] 단계 5 PASS 6항 체크 (**스크립트**)  
 - [ ] Impl → QA 수동 연쇄  
 - [ ] 메인 **토탈 보고** 템플릿  
 
@@ -343,8 +419,16 @@ capabilities:
 - [ ] `prd.ready` → … → `qa.*` → `run.report.ready` 자동 라우팅  
 - [ ] FAIL 시 이전 단계로 되돌림  
 - [ ] 감사 로그  
+- [ ] `runs/{run_id}/` 작업공간  
 
-### Phase 3 — 확장
+### Phase 3 — Deep Agent
+
+- [ ] Main `tick` 루프 + Todo  
+- [ ] 동적 `spawn(role, …)` (고정 워커 테이블 너머)  
+- [ ] FAIL 시 재계획 (질문 루프 vs PRD 되돌림 vs 부분 Impl)  
+- [ ] 모델 라우팅 정책 (Astra / Opus / 5.6 sol)  
+
+### Phase 4 — 확장
 
 - [ ] 미팅 녹음 → PRD 보조 (확정은 사람)  
 - [ ] 이슈 트래커 연동  
@@ -359,7 +443,9 @@ capabilities:
 3. 3→4→5가 **파일로 분리**되어 추적 가능  
 4. QA 후 **토탈 보고**가 항상 남음  
 5. `run_id`로 PRD→질문→스펙해시→PR→QA→보고 연결  
-6. 실무 1건 E2E (예: CRM 지표)
+6. 실무 1건 E2E (예: CRM 지표)  
+7. (Deep) Main이 스펙/코드를 직접 쓰지 않고 **위임만** 한다  
+8. (Deep) FAIL 시 고정 레일 외 **재계획 경로**가 감사 로그에 남는다  
 
 ---
 
@@ -368,7 +454,8 @@ capabilities:
 - PRD까지 AI가 단독 확정  
 - 사람 답 없이 스펙 PASS  
 - 배포/롤백 오케스트레이션  
-- SDD 툴 자체를 다시 만들기 (우리는 **오케스트레이션**)
+- SDD 툴 자체를 다시 만들기 (우리는 **오케스트레이션**)  
+- “모델만 바꿔 끼우기”를 Deep Agent라고 부르는 것  
 
 ---
 
@@ -381,6 +468,8 @@ capabilities:
 | 스펙 드리프트 | spec hash + invalidate |
 | 프롬프트만 게이트 | fail-closed 스크립트/훅 |
 | 보고 누락 | QA 종료 시 메인 `write_total_report` 필수 |
+| Main이 일을 가로챔 | 스펙/코드 작성 도구를 Main에 주지 않음 |
+| Deep를 자율 추정으로 착각 | SDD 제약은 Deep 루프 안에서도 fail-closed |
 
 ---
 
@@ -390,3 +479,4 @@ capabilities:
 2. `schemas/events.schema.json` (위 이벤트 표)  
 3. Question Extractor ← REVIEW-PROMPT 바인딩  
 4. 토탈 보고 템플릿 + 샘플 런 1건  
+5. Main `tick` / `spawn` / `runs/` 초안 스키마 (Phase 3 준비)  
