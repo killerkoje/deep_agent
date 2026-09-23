@@ -30,6 +30,7 @@
 
 관련 파일:
 
+- 학습·K8s·DB 플랜: [`PLAN.md`](PLAN.md)
 - 게이트 상세: [`gates.md`](gates.md)
 - 이벤트 JSON Schema: [`../schemas/events.schema.json`](../schemas/events.schema.json)
 - Run 상태 Schema: [`../schemas/run-state.schema.json`](../schemas/run-state.schema.json)

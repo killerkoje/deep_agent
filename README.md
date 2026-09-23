@@ -7,6 +7,7 @@
 
 **Status:** Draft / Spec’d  
 **구현 계약:** [`docs/SPEC.md`](docs/SPEC.md) ← 개발은 이 문서 기준  
+**학습·도입 플랜:** [`docs/PLAN.md`](docs/PLAN.md) ← Deep Agent → Postgres/pgvector → K8s  
 **Repo:** [heh139811-droid/work_flow_ochestration_agent](https://github.com/heh139811-droid/work_flow_ochestration_agent)  
 **Local clone:** `C:\Users\PC\Documents\work_flow_ochestration_agent`
 
