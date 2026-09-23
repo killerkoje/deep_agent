@@ -3,6 +3,17 @@
 작성일: 2026-09-09  
 대상: 이 레포의 핵심 테제 (*스펙을 빈틈없이 보강·검증한 뒤 개발·QA*)
 
+> **v0.2 주석 (2026-09-23)**
+> 본 문서의 **SDD 분석은 그대로 유효**하다. 다만 아래 두 가지는 이후에 갱신됐다.
+>
+> - **파이프라인:** 8단계 → **SDD 0~9**. 단계 0(자료 수집)과 **6(ready 권한 검수)** 이 추가됐다.
+>   §3의 Verify PASS 6항은 「비어 있는 것」을 보고, ready는 「채워졌는데 근거 없는 것」을 본다.
+>   → [`../README.md`](../README.md) §2, [`SPEC.md`](SPEC.md) §10.4
+> - **REVIEW-PROMPT:** 외부 레포 경로를 참조했으나, 이제 레포 안에 있다.
+>   → [`templates/spec-review-boilerplate.md`](templates/spec-review-boilerplate.md), [`SPEC.md`](SPEC.md) §10.2
+>
+> 실행 엔진 결정(LangGraph 채택)은 본 문서의 분석 범위 밖이다. → [`concepts.md`](concepts.md)
+
 ---
 
 ## 1. 판결

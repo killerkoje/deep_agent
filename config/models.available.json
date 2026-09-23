@@ -1,0 +1,42 @@
+{
+  "_comment": "Callable model catalog. G_MODEL_KNOWN validates against this list. NEVER add default_for_skill / role / skills fields - the schema forbids them on purpose so this file cannot become a role-to-model assignment table. Main picks the model per spawn using the 'notes' capability hints below. Prices are USD per 1M tokens, verified 2026-09-23.",
+  "_schema": "../schemas/models.available.schema.json",
+  "models": [
+    {
+      "id": "gpt-6-astra",
+      "provider": "openai",
+      "display_name": "GPT-6 Astra",
+      "currency": "usd",
+      "input_per_1m": 10.0,
+      "output_per_1m": 50.0,
+      "notes": "Strongest. Use where a miss is silent rather than loud - adversarial reading across distant sections, spotting assumptions that read as true, holding one codebase consistent. 1.05M ctx, 128K out, cutoff 2026-04-30, reasoning low..max. 100x the price of luna: justify it."
+    },
+    {
+      "id": "gpt-6-sol",
+      "provider": "openai",
+      "display_name": "GPT-6 Sol",
+      "currency": "usd",
+      "input_per_1m": 2.0,
+      "output_per_1m": 10.0,
+      "notes": "Balanced. Good for formulaic-but-long work: filling a boilerplate, classifying into fixed buckets, mapping clauses to evidence. 1.05M ctx, 128K out, cutoff 2026-04-20, reasoning none..max."
+    },
+    {
+      "id": "gpt-6-luna",
+      "provider": "openai",
+      "display_name": "GPT-6 Luna",
+      "currency": "usd",
+      "input_per_1m": 0.1,
+      "output_per_1m": 0.5,
+      "notes": "Cheapest and fastest, newest cutoff. Good for high-volume constrained decisions where the option set is small and the state is already summarized. 1.05M ctx, 128K out, cutoff 2026-05-18, reasoning none..max. Raise reasoning effort before escalating tier."
+    },
+    {
+      "id": "text-embedding-3-small",
+      "provider": "openai",
+      "display_name": "text-embedding-3-small (Store only)",
+      "currency": "usd",
+      "input_per_1m": 0.02,
+      "output_per_1m": 0.0,
+      "notes": "Embedding model for the long-term Store only - never spawn a skill with this. 1536 dims, which is what pgvector HNSW can index (limit 2000d). text-embedding-3-large defaults to 3072d and CANNOT be HNSW-indexed without truncating via the dimensions param."
+    }
+  ]
+}

@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/heh139811-droid/work_flow_ochestration_agent/schemas/run-state.schema.json",
-  "title": "RunState",
+  "$id": "https://github.com/heh139811-droid/deep_agent/schemas/run-state.schema.json",
+  "title": "SddState",
+  "description": "AgentState['sdd'] — SDD orchestration metadata. NOT the LangGraph checkpoint; the checkpointer owns messages/todos/files.",
   "type": "object",
   "required": [
     "run_id",
     "feature_id",
-    "status",
     "verify_passed",
     "spawn_history",
     "created_at",
@@ -14,23 +14,47 @@
   ],
   "properties": {
     "run_id": { "type": "string" },
-    "feature_id": { "type": "string" },
-    "status": {
-      "type": "string",
-      "enum": ["created", "running", "waiting_human", "failed", "completed"]
-    },
-    "phase": {
+    "thread_id": {
       "type": ["string", "null"],
-      "description": "Hint only; gates do not trust this field"
+      "description": "LangGraph thread key. MVP: same value as run_id"
+    },
+    "feature_id": { "type": "string" },
+    "stage": {
+      "type": ["string", "null"],
+      "description": "Pipeline hint 0-9. Gates MUST NOT trust this field",
+      "enum": [
+        "0-sources",
+        "1-spec-draft",
+        "2-questions",
+        "3-triage",
+        "4-answers",
+        "5-rereview",
+        "6-ready",
+        "7-implement",
+        "8-qa",
+        "9-report",
+        null
+      ]
     },
     "spec_hash": { "type": ["string", "null"] },
-    "verify_passed": { "type": "boolean" },
+    "verify_passed": {
+      "type": "boolean",
+      "description": "Gate truth source. Only gates.verify_spec() may set this to true"
+    },
+    "ready_open_count": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Open items in ready.md section 1. MUST be 0 before implement (G_READY)"
+    },
     "last_event": { "type": ["string", "null"] },
     "waiting_for": {
       "type": ["string", "null"],
-      "enum": ["answers", "prd_revision", null]
+      "enum": ["sources", "answers", null]
     },
-    "target_repo_path": { "type": ["string", "null"] },
+    "target_repo_path": {
+      "type": ["string", "null"],
+      "description": "Real disk path for implement/qa. Code never lives in AgentState.files"
+    },
     "budget": {
       "type": "object",
       "properties": {
@@ -50,8 +74,11 @@
             "type": "string",
             "enum": [
               "spec-write",
-              "question-extract",
+              "openspec",
+              "spec-kit",
+              "answer-triage",
               "spec-rereview",
+              "ready-audit",
               "implement",
               "qa"
             ]
@@ -60,7 +87,35 @@
           "brief": { "type": "string" },
           "at": { "type": "string", "format": "date-time" },
           "result": { "type": ["string", "null"] },
-          "event": { "type": ["string", "null"] }
+          "event": { "type": ["string", "null"] },
+          "tokens_in": { "type": ["integer", "null"] },
+          "tokens_out": { "type": ["integer", "null"] },
+          "cost_usd": { "type": ["number", "null"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "gate_rejects": {
+      "type": "array",
+      "description": "Recent rejections injected into Main context so it replans instead of retrying the same wall",
+      "items": {
+        "type": "object",
+        "required": ["code", "at"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "G_MODEL_KNOWN",
+              "G_NO_IMPL_WITHOUT_VERIFY",
+              "G_READY",
+              "G_ANSWERS_HUMAN",
+              "G_SESSION_QA",
+              "G_BUDGET"
+            ]
+          },
+          "message": { "type": "string" },
+          "skill": { "type": ["string", "null"] },
+          "at": { "type": "string", "format": "date-time" }
         },
         "additionalProperties": false
       }

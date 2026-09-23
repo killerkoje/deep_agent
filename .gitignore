@@ -1,0 +1,35 @@
+# Runtime data
+workspace/
+runs/
+*.db
+*.sqlite3
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+config/models.available.local.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

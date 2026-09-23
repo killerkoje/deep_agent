@@ -1,37 +1,58 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/heh139811-droid/work_flow_ochestration_agent/schemas/events.schema.json",
+  "$id": "https://github.com/heh139811-droid/deep_agent/schemas/events.schema.json",
   "title": "DeepAgentEvent",
+  "description": "Input signals to Main. An event never invokes the next skill directly - Main decides via spawn.",
   "type": "object",
   "required": ["event", "run_id", "feature_id", "ts", "actor"],
   "properties": {
     "event": {
       "type": "string",
       "enum": [
-        "prd.ready",
+        "sources.ready",
         "spec.draft.ready",
         "questions.ready",
+        "triage.ready",
         "answers.ready",
+        "spec.updated",
+        "ready.audit.ready",
         "spec.verify.passed",
         "spec.verify.failed",
-        "impl.pr.ready",
+        "impl.ready",
         "qa.passed",
         "qa.failed",
         "run.report.ready"
       ]
     },
     "run_id": { "type": "string", "minLength": 1 },
+    "thread_id": { "type": ["string", "null"] },
     "feature_id": { "type": "string", "minLength": 1 },
     "ts": { "type": "string", "format": "date-time" },
     "actor": {
       "type": "string",
-      "description": "human | main | gate | skill id"
+      "description": "human | main | gate | skill id",
+      "enum": [
+        "human",
+        "main",
+        "gate",
+        "spec-write",
+        "openspec",
+        "spec-kit",
+        "answer-triage",
+        "spec-rereview",
+        "ready-audit",
+        "implement",
+        "qa"
+      ]
     },
     "spec_ref": {
       "type": ["string", "null"],
-      "description": "path@sha256:…"
+      "description": "path@sha256:..."
     },
-    "spawn_id": { "type": ["string", "null"] },
+    "spawn_id": {
+      "type": ["string", "null"],
+      "description": "Idempotency key. Re-delivery of the same spawn_id is ignored"
+    },
     "artifacts": {
       "type": "object",
       "additionalProperties": { "type": "string" }
@@ -39,10 +60,19 @@
     "reasons": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "verify/qa failure reasons"
+      "description": "verify / qa failure reasons, fed back to Main for replanning"
+    },
+    "ready_open_count": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Set by ready.audit.ready"
     },
     "pr_url": { "type": ["string", "null"] },
-    "patch_path": { "type": ["string", "null"] }
+    "patch_path": { "type": ["string", "null"] },
+    "e2e_report": {
+      "type": ["string", "null"],
+      "description": "Playwright result path, set by qa.*"
+    }
   },
   "additionalProperties": false
 }
