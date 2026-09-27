@@ -22,14 +22,17 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from .llm import get_main_model
 from .nodes.main_agent import make_main_agent_node
 from .state import AgentState
+from .tools.spawn import spawn
 from .tools.todos import write_todos
 
-# S1 tool set. `spawn` lands in S2, `wait_human` in S5.
+# S2 tool set. `wait_human` lands in S5.
+#
+# `spawn` is a TOOL, never a node - see src/deep_agent/tools/spawn.py.
 #
 # Deliberately absent, permanently: write_file, apply_patch, git_commit,
 # bash. Main taking over the work is prevented by not handing it the
 # tools, not by asking it nicely (SPEC 8.3).
-MAIN_TOOLS = [write_todos]
+MAIN_TOOLS = [write_todos, spawn]
 
 
 def build_graph(tools=None, model_factory=get_main_model, checkpointer=None):
