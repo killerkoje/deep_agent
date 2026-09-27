@@ -129,7 +129,7 @@ AI는 정지를 **걸 수는 있어도 풀 수 없다.** 오탐으로 불필요�
 - `interrupt()` → 체크포인트 저장 → 프로세스 죽어도 됨
 - **타임아웃 없음.** 답이 올 때까지 진행하지 않는다
 
-### 0.2 모델 정책 — 고정표 없음
+### 0.4 모델 정책 — 고정표 없음
 
 - **역할→모델 배치표를 두지 않는다.** 실험 정책으로도 두지 않는다.
 - Main은 가용 모델 목록 안에서 **비용·난이도·실패 이력**을 보고 매번 고른다.
@@ -542,52 +542,82 @@ SDD 전용 필드(`spec_hash`, `verify_passed`, `spawn_history` …)는 [`docs/S
 - [x] **v0.4 — E2E 실패 정책 (원인 4종 → 경로 4종), 루프 가드 5종, `e2e-triage`**
 - [x] **v0.5 — 무정지 자율 결정 + 권한·과금만 정지, `[AI 결정]` 표기, `crosscheck`**
 
-### Phase 1 — 최소 루프 (InMemorySaver)
+### Phase 1 — 최소 루프 ✅
 
-- [ ] `AgentState` + main_agent 노드 + tools 노드 + 조건부 엣지
-- [ ] `write_todos` 툴
-- [ ] `spawn` 툴 — **별도 graph invoke, 요약만 반환**
-- [ ] 게이트 stub — 거부가 ToolMessage로 돌아가 재계획되는지
-- [ ] 토큰·비용 계측 켜기
+- [x] `AgentState` + main_agent 노드 + tools 노드 + 조건부 엣지 — **노드 2개**
+- [x] `write_todos` 툴 + **매 턴 재주입**(recitation)
+- [x] `spawn` 툴 — **별도 graph invoke, 요약만 반환**
+- [x] 게이트 거부가 ToolMessage로 돌아가 Main이 재계획
+- [x] 토큰·비용 계측
 
-### Phase 2 — SDD 파이프라인
+### Phase 2 — SDD 파이프라인 ✅
 
-- [ ] 스킬 `SKILL.md` 10종 (spec-write / openspec / spec-kit / **decide** / spec-rereview / **crosscheck** / ready-audit / implement / qa / e2e-triage)
-- [ ] 표기 검사 스크립트 (`[AI 결정]` 근거·대안·확신도)
-- [ ] 권한·과금 **이중 검사** (AI 분류 ∪ 게이트 스캔)
-- [ ] `interrupt()` 권한·과금 정지 + `Command(resume=…)`
-- [ ] verify 6항 게이트 스크립트
+- [x] 스킬 계약 10종 (프롬프트는 아직 `skills_loader.py` 인라인 — 파일 분리는 미완)
+- [x] `G_DECISION_LOGGED` — 근거가 **인용**이 아니면 거부
+- [x] 권한·과금 **이중 검사** (AI 분류 ∪ 게이트 독립 스캔)
+- [x] `interrupt()` 정지 + `Command(resume=…)` 재개
+- [x] verify 6항 + `G_READY` + `G_OPENSPEC_VALID`
+- [x] `openspec` / `specify` CLI 래퍼 (allowlist · `shell=False`)
 
-### Phase 3 — 영속화 (단기)
+### Phase 3 — 영속화 (단기) 🔶
 
-- [ ] PostgreSQL checkpointer
-- [ ] thread 단위 저장·로드 (**부르는 스레드만**)
-- [ ] 프로세스 재시작 후 같은 `thread_id` 재개
-- [ ] 압축(compaction) 전략
+- [x] `checkpoint.py` — `DATABASE_URL` 있으면 `PostgresSaver`, 없으면 `InMemorySaver`
+- [x] thread 단위 저장·로드
+- [ ] **Postgres로 실제 재시작 재개 검증** (지금은 in-memory로만 확인)
+- [ ] 압축(compaction) — **문서엔 "하네스의 본체"인데 미구현**
 
-### Phase 4 — 구현·QA·실패 루프
+### Phase 4 — 구현·QA·실패 루프 🔶
 
-- [ ] implement → 실제 디스크 · git 브랜치
-- [ ] Playwright E2E (트레이스·스크린샷은 **경로만** State에)
-- [ ] `e2e-triage` + 4종 라우팅
-- [ ] 루프 가드 5종 + `G_TEST_INTEGRITY`
-- [ ] **구멍 있는 스펙을 일부러 넣고 `spec_gap`으로 나가는지 검증**
-- [ ] 토탈 보고
+- [x] `e2e-triage` + **4종 라우팅** — `spec_gap`은 루프 이탈
+- [x] 루프 가드 5종 (`G_LOOP`) + `G_TRIAGE_FIRST`
+- [x] `G_TEST_INTEGRITY` — 테스트 약화로 통과 조작 차단
+- [x] `record_e2e` — 트레이스·스샷은 **경로만**
+- [x] 토탈 보고 (`report.md`) — 확신도 `하`를 맨 위로
+- [ ] `implement` 실물 — 디스크 쓰기 · git 브랜치
+- [ ] Playwright 실제 실행
 
-### Phase 5 — 장기 기억 (Store)
+### Phase 5 — 장기 기억 (Store) ⬜
 
-- [ ] `PostgresStore` + `CREATE EXTENSION vector`
-- [ ] `memories` 테이블 + HNSW 인덱스
-- [ ] `recall` / `remember` 툴 — **Main 전용**
-- [ ] 회수 지점 4곳 (런 시작 · 구멍찾기 전 · 권한검수 전 · 보고)
-- [ ] 오염 방지 — `evidence` 필수 · `confirmed`만 자동 주입 · **answers 저장 금지**
+- [ ] `PostgresStore` + `CREATE EXTENSION vector` / `memories` + HNSW
+- [ ] `recall` / `remember` — **Main 전용**
+- [ ] 회수 지점 4곳 · 오염 방지 3종
 
-### Phase 6 — 배포
+### Phase 6 — 배포 ⬜
 
-- [ ] Docker Compose
-- [ ] K8s (**개념부터 학습하며**)
-- [ ] cloudflared 외부 접속
-- [ ] (이후) AWS / GCP
+- [ ] Docker Compose / K8s / cloudflared
+
+---
+
+## 9.1 지금 되는 것 · 안 되는 것
+
+**되는 것** — 자료 투입부터 보고까지 한 바퀴. 게이트 13종. HTTP API 9개 + CLI.
+
+```
+sources → spec-write → openspec ∥ spec-kit → decide → spec-rereview
+        → crosscheck → ready-audit → verify → [권한·과금 정지] → report
+```
+
+**안 되는 것**
+
+| | |
+|---|---|
+| **실제 LLM 호출** | **0회.** 테스트 114개가 전부 스크립트 모델. `gpt-6-*`가 우리 툴 스키마를 제대로 부르는지 미검증 |
+| 실제 코드 구현 | `implement`가 디스크에 못 씀 — 계약과 게이트만 있음 |
+| Playwright | 미실행 |
+| Postgres | 코드 경로는 있으나 실제로 안 붙여봄 |
+| Store / 배포 | 미착수 |
+
+**코드 ~2,400줄 · 테스트 114개 (API 키 불필요).**
+
+### 검증된 것 중 중요한 셋
+
+1. **격리** — 서브에이전트가 내부에서 9개 메시지를 쓸 때 Main에는 **ToolMessage 1개**만 들어옵니다. 일부러 노드로 만든 대조 실험도 테스트로 남겨뒀습니다(그쪽은 4개 전부 오염).
+2. **정지를 AI가 못 풉니다** — 결정을 `category="일반"`으로 분류해도 게이트가 독립 스캔으로 잡아 `G_HUMAN_GATE`를 겁니다.
+3. **`spec_gap`이 루프를 빠져나갑니다** — 재구현으로 돌리면 AI가 빈칸을 추정으로 메우고 그 추정이 테스트를 통과합니다. 대신 `verify_passed`를 내려 스펙 단계로 되돌립니다.
+
+### 설계 주장이 실측으로 확인된 것
+
+`max_iterations=3`은 상한이지 목표가 아니라고 문서에 적었는데, 예산 소진 테스트를 짜니 **가드 2(같은 진단 2연속)가 2회차에서 먼저 걸렸습니다.** 두 테스트를 다 남겼습니다.
 
 ---
 
