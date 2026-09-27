@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/heh139811-droid/deep_agent/schemas/run-state.schema.json",
+  "$id": "https://github.com/killerkoje/deep_agent/schemas/run-state.schema.json",
   "title": "SddState",
   "description": "AgentState['sdd'] — SDD orchestration metadata. NOT the LangGraph checkpoint; the checkpointer owns messages/todos/files.",
   "type": "object",

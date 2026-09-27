@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/heh139811-droid/deep_agent/schemas/models.available.schema.json",
+  "$id": "https://github.com/killerkoje/deep_agent/schemas/models.available.schema.json",
   "title": "ModelsAvailable",
   "description": "Catalog of callable models. MUST NOT map roles/skills to default models.",
   "type": "object",

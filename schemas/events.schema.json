@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/heh139811-droid/deep_agent/schemas/events.schema.json",
+  "$id": "https://github.com/killerkoje/deep_agent/schemas/events.schema.json",
   "title": "DeepAgentEvent",
   "description": "Input signals to Main. An event never invokes the next skill directly - Main decides via spawn.",
   "type": "object",

@@ -11,7 +11,7 @@
 **개념 사전:** [`docs/concepts.md`](docs/concepts.md) ← 용어가 헷갈리면 여기부터
 **학습·도입 플랜:** [`docs/PLAN.md`](docs/PLAN.md) ← Deep Agent → Postgres → K8s
 **게이트:** [`docs/gates.md`](docs/gates.md)
-**Repo:** [heh139811-droid/deep_agent](https://github.com/heh139811-droid/deep_agent)
+**Repo:** [killerkoje/deep_agent](https://github.com/killerkoje/deep_agent)
 
 ---
 
