@@ -15,10 +15,10 @@ tool choice, which is what makes it an agent (docs/concepts.md 1).
 
 from __future__ import annotations
 
-from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
+from .checkpoint import get_checkpointer
 from .llm import get_main_model
 from .nodes.main_agent import make_main_agent_node
 from .state import AgentState
@@ -63,7 +63,6 @@ def build_graph(tools=None, model_factory=get_main_model, checkpointer=None):
     )
     builder.add_edge("tools", "main_agent")
 
-    # S1 uses InMemorySaver. Swapping in PostgresSaver at Phase C is a
-    # one-line change here - that is the payoff for not hand-rolling
-    # persistence (SPEC 12.2).
-    return builder.compile(checkpointer=checkpointer or InMemorySaver())
+    # In-memory locally, Postgres once DATABASE_URL is set. One call,
+    # because we did not hand-roll persistence (SPEC 12.2).
+    return builder.compile(checkpointer=checkpointer or get_checkpointer())
