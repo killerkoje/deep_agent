@@ -22,17 +22,30 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from .llm import get_main_model
 from .nodes.main_agent import make_main_agent_node
 from .state import AgentState
+from .tools.control import fail_run, finish
 from .tools.spawn import spawn
 from .tools.todos import write_todos
+from .tools.verify import check_human_gate, run_verify
 
-# S2 tool set. `wait_human` lands in S5.
+# Main's complete tool set.
 #
 # `spawn` is a TOOL, never a node - see src/deep_agent/tools/spawn.py.
 #
 # Deliberately absent, permanently: write_file, apply_patch, git_commit,
-# bash. Main taking over the work is prevented by not handing it the
-# tools, not by asking it nicely (SPEC 8.3).
-MAIN_TOOLS = [write_todos, spawn]
+# bash. Main delegates work; it does not do it. Enforced by tool absence
+# rather than prompt wording (SPEC 8.3).
+#
+# Note what Main also cannot do: set verify_passed, or answer a
+# permission question. run_verify and check_human_gate let it ASK for a
+# verdict, not issue one.
+MAIN_TOOLS = [
+    write_todos,
+    spawn,
+    run_verify,
+    check_human_gate,
+    finish,
+    fail_run,
+]
 
 
 def build_graph(tools=None, model_factory=get_main_model, checkpointer=None):

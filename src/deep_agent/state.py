@@ -65,6 +65,27 @@ class AgentState(TypedDict, total=False):
     max_iterations: int
 
 
+# Which pipeline stage an event puts us in. A hint for Main and for the
+# report - gates never trust it (schemas/run-state.schema.json).
+STAGE_OF_EVENT = {
+    "sources.ready": "0-sources",
+    "spec.draft.ready": "1-spec-draft",
+    "questions.ready": "2-questions",
+    "decisions.ready": "3-decide",
+    "spec.updated": "4-rereview",
+    "crosscheck.ready": "5-crosscheck",
+    "ready.audit.ready": "6-ready",
+    "human.gate.raised": "6b-human-gate",
+    "human.decided": "6b-human-gate",
+    "spec.verify.passed": "6-ready",
+    "impl.ready": "7-implement",
+    "qa.passed": "8-qa",
+    "qa.failed": "8-qa",
+    "triage.diagnosed": "8b-triage",
+    "run.report.ready": "9-report",
+}
+
+
 def initial_state(
     *,
     thread_id: str,

@@ -125,6 +125,37 @@ def spec_drifted(sdd: dict[str, Any], files: dict[str, str]) -> bool:
 
 
 # --------------------------------------------------------------------
+# G_OPENSPEC_VALID - a deterministic verdict, which is why it earns a gate
+# --------------------------------------------------------------------
+
+
+def check_openspec_valid(
+    exit_code: int, report: dict[str, Any] | None, skipped: bool = False
+) -> GateReject | None:
+    """Judge an `openspec validate --strict --json` run.
+
+    The caller runs the CLI (that is I/O); this only reads the verdict,
+    which keeps the rule testable without a subprocess.
+
+    `skipped=True` when the binary is absent - a missing tool must not
+    silently look like a pass, but it also must not block a local dev
+    loop, so it surfaces as its own message.
+    """
+    if skipped:
+        return GateReject("G_OPENSPEC_VALID", "openspec not installed; validation skipped")
+    if exit_code == 0:
+        return None
+
+    findings = (report or {}).get("findings") or (report or {}).get("issues") or []
+    if findings:
+        head = "; ".join(
+            str(f.get("message") or f.get("detail") or f)[:80] for f in findings[:3]
+        )
+        return GateReject("G_OPENSPEC_VALID", f"{len(findings)} finding(s): {head}")
+    return GateReject("G_OPENSPEC_VALID", f"validate exited {exit_code}")
+
+
+# --------------------------------------------------------------------
 # G_DECISION_LOGGED - filling a blank is fine; hiding that you filled it
 # is not
 # --------------------------------------------------------------------
@@ -163,6 +194,65 @@ def check_decisions_logged(decisions: list[dict[str, Any]]) -> GateReject | None
     if reasons:
         return GateReject("G_DECISION_LOGGED", "; ".join(reasons[:5]))
     return None
+
+
+# decisions.md is what a person reads; this is what the gates read.
+# Parsing here rather than trusting the sub-agent to also emit JSON: one
+# artifact, one source of truth, and a malformed entry surfaces as a
+# missing field the gate already rejects.
+_D_HEAD = re.compile(r"^##\s+(D-\d{3,})\s*(.*)$", re.M)
+_D_FIELD = re.compile(r"^\s*-\s*\*\*(.+?):\*\*\s*(.*)$", re.M)
+_D_TAG = re.compile(r"\[(코드|AI 결정|답변|정지 후보|CROSS)\]")
+
+_FIELD_KEYS = {
+    "결정": "text",
+    "근거": "rationale",
+    "대안": "alternatives",
+    "확신도": "confidence",
+    "분류": "category",
+    "답": "answer",
+    "왜": "rationale",
+    "선택지": "alternatives",
+}
+
+
+def parse_decisions_md(md: str) -> list[dict[str, Any]]:
+    """decisions.md -> the structured list the gates operate on."""
+    if not md:
+        return []
+
+    out: list[dict[str, Any]] = []
+    heads = list(_D_HEAD.finditer(md))
+    for i, head in enumerate(heads):
+        end = heads[i + 1].start() if i + 1 < len(heads) else len(md)
+        body = md[head.end() : end]
+
+        entry: dict[str, Any] = {
+            "id": head.group(1),
+            "title": head.group(2).strip(),
+            "tag": None,
+            "category": "일반",
+        }
+        for key, value in _D_FIELD.findall(body):
+            mapped = _FIELD_KEYS.get(key.strip())
+            if mapped and not entry.get(mapped):
+                entry[mapped] = value.strip()
+
+        if tag := _D_TAG.search(body):
+            entry["tag"] = f"[{tag.group(1)}]"
+        # the tag marks authority; it is not part of the decision text
+        for key in ("text", "rationale", "alternatives"):
+            if entry.get(key):
+                entry[key] = _D_TAG.sub("", entry[key]).strip()
+        if entry.get("category") not in {"일반", "권한", "과금"}:
+            entry["category"] = "일반"
+        if entry["tag"] == "[정지 후보]" and entry.get("category") == "일반":
+            # Flagged as a stop candidate but left unclassified - treat
+            # it as raised rather than letting it fall through.
+            entry["category"] = "권한"
+
+        out.append(entry)
+    return out
 
 
 # --------------------------------------------------------------------

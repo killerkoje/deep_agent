@@ -27,10 +27,11 @@ from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
-from .. import gates, skills_loader
+from .. import gates, sdd_cli, skills_loader
 from . import fs
 from ..llm import _price
 from ..models_catalog import spawnable_ids
+from ..state import STAGE_OF_EVENT
 from ..subagent import run_subagent
 
 # Injected by tests so the loop can run without an API key.
@@ -46,6 +47,19 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _record_reject(sdd: dict, verdict: gates.GateReject) -> dict:
+    rejects = list(sdd.get("gate_rejects") or [])
+    rejects.append(
+        {
+            "code": verdict.code,
+            "message": verdict.message,
+            "skill": verdict.skill,
+            "at": _now(),
+        }
+    )
+    return {**sdd, "gate_rejects": rejects[-10:]}
+
+
 def _reject(verdict: gates.GateReject, tool_call_id: str, sdd: dict):
     """Translate a gate verdict into this world's currency: a ToolMessage.
 
@@ -56,21 +70,12 @@ def _reject(verdict: gates.GateReject, tool_call_id: str, sdd: dict):
     The rejection is also kept in `sdd.gate_rejects`, which main_agent
     re-injects next turn so Main does not walk into the same wall twice.
     """
-    rejects = list(sdd.get("gate_rejects") or [])
-    rejects.append(
-        {
-            "code": verdict.code,
-            "message": verdict.message,
-            "skill": verdict.skill,
-            "at": _now(),
-        }
-    )
     return Command(
         update={
             "messages": [
                 ToolMessage(f"GateReject: {verdict}", tool_call_id=tool_call_id)
             ],
-            "sdd": {**sdd, "gate_rejects": rejects[-10:]},
+            "sdd": _record_reject(sdd, verdict),
         }
     )
 
@@ -148,9 +153,9 @@ def spawn(
         }
     )
 
-    sdd.update(
-        {"spawn_history": history, "budget": budget, "last_event": sk.event}
-    )
+    sdd.update({"spawn_history": history, "budget": budget, "last_event": sk.event})
+    if stage := STAGE_OF_EVENT.get(sk.event or ""):
+        sdd["stage"] = stage
 
     # Only declared outputs are merged back; a sub-agent cannot write
     # wherever it likes in the shared workspace.
@@ -159,6 +164,34 @@ def spawn(
         for path, content in (result["files"] or {}).items()
         if path in sk.outputs or any(path.startswith(o.rstrip("*")) for o in sk.outputs)
     }
+    merged_files = {**files, **produced}
+
+    # decisions.md is the artifact people read; sdd.decisions is what
+    # the gates read. Re-parsed after any skill that touches it, so the
+    # two cannot drift apart.
+    if "decisions.md" in produced:
+        sdd["decisions"] = gates.parse_decisions_md(produced["decisions.md"])
+
+    # --- post-run gates ------------------------------------------
+    # The work is kept either way - a rejection here means "this is not
+    # good enough yet", not "throw it away". Main sees why and respawns,
+    # usually with a different model or a sharper brief.
+    after = _check_outputs(skill, sk, merged_files, sdd)
+    if after is not None:
+        sdd = _record_reject(sdd, after)
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        f"[{skill} @ {model}] {result['summary']}\n"
+                        f"GateReject: {after}",
+                        tool_call_id=tool_call_id,
+                    )
+                ],
+                "files": merged_files,
+                "sdd": sdd,
+            }
+        )
 
     return Command(
         update={
@@ -168,7 +201,31 @@ def spawn(
                     tool_call_id=tool_call_id,
                 )
             ],
-            "files": {**(state.get("files") or {}), **produced},
+            "files": merged_files,
             "sdd": sdd,
         }
     )
+
+
+def _check_outputs(
+    skill: str, sk, files: dict[str, str], sdd: dict[str, Any]
+) -> gates.GateReject | None:
+    """Gates that can only run once the sub-agent has produced something."""
+    missing = [p for p in sk.outputs if p not in files]
+    if missing:
+        return gates.GateReject(
+            "G_OUTPUT_MISSING", f"skill did not produce {', '.join(missing)}", skill
+        )
+
+    if skill == "openspec":
+        workspace = sdd.get("target_repo_path")
+        if not workspace or not sdd_cli.available("openspec"):
+            # Not installed locally is a known state, not a silent pass.
+            return gates.check_openspec_valid(0, None, skipped=True)
+        res = sdd_cli.openspec_validate(workspace)
+        return gates.check_openspec_valid(res.exit_code, res.json())
+
+    if skill in {"decide", "spec-rereview", "crosscheck"}:
+        return gates.check_decisions_logged(sdd.get("decisions") or [])
+
+    return None
