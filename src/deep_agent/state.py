@@ -40,6 +40,49 @@ class TodoItem(TypedDict):
     status: TodoStatus
 
 
+# --- reducers for the channels two spawns can write in the same turn --
+#
+# openspec and spec-kit are meant to run in parallel (they must not see
+# each other's findings - overlap between independent readings is the
+# signal). With the default last-value channel that is an
+# InvalidUpdateError, so these two channels merge instead.
+
+
+def merge_files(left: dict | None, right: dict | None) -> dict:
+    """Per-path merge. Two sub-agents writing different files both land."""
+    return {**(left or {}), **(right or {})}
+
+
+def _append_unique(left: list | None, right: list | None, key) -> list:
+    out = list(left or [])
+    seen = {key(x) for x in out}
+    for item in right or []:
+        if key(item) not in seen:
+            seen.add(key(item))
+            out.append(item)
+    return out
+
+
+def merge_sdd(left: dict | None, right: dict | None) -> dict:
+    """Scalars take the newer value; the two logs accumulate.
+
+    Parallel branches each start from the same base, so their histories
+    overlap - dedupe by spawn_id rather than concatenating blindly.
+    """
+    out = {**(left or {}), **(right or {})}
+    out["spawn_history"] = _append_unique(
+        (left or {}).get("spawn_history"),
+        (right or {}).get("spawn_history"),
+        key=lambda s: s.get("spawn_id"),
+    )
+    out["gate_rejects"] = _append_unique(
+        (left or {}).get("gate_rejects"),
+        (right or {}).get("gate_rejects"),
+        key=lambda r: (r.get("code"), r.get("skill"), r.get("at")),
+    )
+    return out
+
+
 class AgentState(TypedDict, total=False):
     # --- conversation ---
     messages: Annotated[list, add_messages]
@@ -48,14 +91,14 @@ class AgentState(TypedDict, total=False):
 
     # --- deep agent core ---
     todos: list[TodoItem]  # Planning  - re-injected every turn
-    files: dict[str, str]  # Filesystem - documents only
+    files: Annotated[dict[str, str], merge_files]  # documents only
 
     # --- execution control ---
     status: RunStatus
     next_action: str | None
 
     # --- SDD metadata (schemas/run-state.schema.json) ---
-    sdd: dict[str, Any]
+    sdd: Annotated[dict[str, Any], merge_sdd]
 
     # --- implement / verify loop (SPEC 5.5) ---
     implementation: dict[str, Any]

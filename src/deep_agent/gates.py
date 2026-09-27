@@ -256,6 +256,46 @@ def parse_decisions_md(md: str) -> list[dict[str, Any]]:
 
 
 # --------------------------------------------------------------------
+# G_READY input - counting what is still open in ready.md
+# --------------------------------------------------------------------
+
+# ready.md section 1 is the only part open for discussion. Rows there
+# are "| [R1](#r1) | issue | kind | status |"; an item closed in place
+# keeps its row and flips its status to 닫힘 (docs/SPEC.md 10.4).
+_READY_SECTION_1 = re.compile(
+    r"^##\s*1\.[^\n]*\n(.*?)(?=^##\s|\Z)", re.M | re.S
+)
+_READY_ROW = re.compile(r"^\|\s*\[?R\d+\]?[^|]*\|(.*)$", re.M)
+_CLOSED = re.compile(r"닫힘|closed|해결|완료")
+
+
+def count_ready_open(ready_md: str | None) -> int | None:
+    """How many items ready.md still has open. None if it has not run.
+
+    None and 0 are different: "the audit never happened" must not read
+    as "the audit found nothing", which is why G_READY rejects both but
+    with different messages.
+    """
+    if not ready_md:
+        return None
+
+    section = _READY_SECTION_1.search(ready_md)
+    if not section:
+        return None
+
+    body = section.group(1)
+    rows = _READY_ROW.findall(body)
+    if rows:
+        return sum(1 for rest in rows if not _CLOSED.search(rest))
+
+    # No table. Accept an explicit "0건" / "없음" as a closed audit;
+    # anything else is unparseable and stays unknown rather than passing.
+    if re.search(r"\b0\s*건|없음|none", body, re.I):
+        return 0
+    return None
+
+
+# --------------------------------------------------------------------
 # G_HUMAN_GATE - permission and billing, the two that cannot be undone
 # --------------------------------------------------------------------
 

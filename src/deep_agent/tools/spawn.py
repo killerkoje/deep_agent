@@ -172,6 +172,12 @@ def spawn(
     if "decisions.md" in produced:
         sdd["decisions"] = gates.parse_decisions_md(produced["decisions.md"])
 
+    # Same idea for ready.md: G_READY needs a number, not prose. Left
+    # as None when the audit has not run or its output is unparseable -
+    # "no audit" must not read as "audit found nothing".
+    if "ready.md" in produced:
+        sdd["ready_open_count"] = gates.count_ready_open(produced["ready.md"])
+
     # --- post-run gates ------------------------------------------
     # The work is kept either way - a rejection here means "this is not
     # good enough yet", not "throw it away". Main sees why and respawns,
