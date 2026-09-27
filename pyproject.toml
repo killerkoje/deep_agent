@@ -15,7 +15,11 @@ dependencies = [
     "uvicorn[standard]==0.41.0",
     "pydantic==2.12.4",
     "python-dotenv==1.2.1",
+    "httpx==0.28.1",
 ]
+
+[project.scripts]
+deep-agent = "deep_agent.cli:main"
 
 [dependency-groups]
 dev = [

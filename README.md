@@ -15,6 +15,37 @@
 
 ---
 
+## 실행
+
+```bash
+uv sync
+cp .env.example .env          # OPENAI_API_KEY 채우기
+
+uv run uvicorn deep_agent.app:app --reload     # 서버
+uv run pytest -q                                # 테스트 (API 키 불필요)
+```
+
+**CLI** — 서버에 붙는 얇은 클라이언트입니다. 그래프를 직접 import하지 않으므로
+터미널에서 쓰는 경로와 서버가 도는 경로가 갈라지지 않습니다.
+
+```bash
+deep-agent run --feature crm docs/prd.md docs/mail.md
+deep-agent status  <thread>
+deep-agent gate    <thread>                       # 권한·과금 질문 확인
+deep-agent gate    <thread> -a D-013="① 마스킹"    # 답하고 재개
+deep-agent files   <thread> [spec.md]
+deep-agent report  <thread>
+```
+
+> **Windows에서 `deep-agent`가 Application Control에 막히면**
+> `uv run python -m deep_agent …` 로 동일하게 동작합니다.
+
+`/health`가 두 가지를 알려줍니다 — `model_credentials`(키가 있나)와
+**`durable`**(재시작해도 스레드가 살아남나). `durable: false`면 `DATABASE_URL`이
+없다는 뜻이고, 그 상태에서는 "타임아웃 없는 `waiting_human`"이 성립하지 않습니다.
+
+---
+
 ## 0. Deep Agent란 — 네 기둥
 
 Deep Agent는 모델 이름이 아니라 **하네스(harness)** 다.

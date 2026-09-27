@@ -46,6 +46,17 @@ def cfg(thread_id: str) -> dict:
     return {"configurable": {"thread_id": thread_id}}
 
 
+def require_model_credentials() -> None:
+    """A missing key is a predictable, user-fixable condition - it should
+    read as one, not as a 500 with a provider stack trace."""
+    if not settings.openai_api_key:
+        raise HTTPException(
+            503,
+            "OPENAI_API_KEY is not set. Copy .env.example to .env and fill it in, "
+            "or export the variable before starting the server.",
+        )
+
+
 def auth(authorization: str = Header(default="")) -> None:
     if authorization != f"Bearer {settings.orch_api_token}":
         raise HTTPException(401, "bad or missing bearer token")
@@ -88,6 +99,7 @@ def health() -> dict:
     return {
         "ok": True,
         "main_model": settings.main_model,
+        "model_credentials": bool(settings.openai_api_key),
         "durable": is_durable(),  # false means a restart loses running threads
     }
 
@@ -100,6 +112,7 @@ def models(_: None = Depends(auth)) -> dict:
 
 @app.post("/api/v1/threads", status_code=201)
 def create_thread(body: CreateThread, _: None = Depends(auth)) -> dict:
+    require_model_credentials()
     from datetime import datetime, timezone
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -169,6 +182,8 @@ def answer_human_gate(
     ]
     if not pending:
         raise HTTPException(409, "this thread is not waiting on a human")
+
+    require_model_credentials()  # resuming runs the graph again
 
     answers = [a.model_dump() for a in body.answers]
     verdict = gates.check_answers_human(answers, actor="human", pending_ids=pending)

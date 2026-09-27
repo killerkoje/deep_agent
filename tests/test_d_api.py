@@ -11,6 +11,8 @@ gates.check_answers_human and just translates the verdict into a 400.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -41,6 +43,12 @@ def api(monkeypatch):
     main = ScriptedChatModel(HAPPY[:-1], final_text="parked")
     graph = build_graph(model_factory=lambda: main)
     monkeypatch.setattr(app_mod, "_GRAPH", graph)
+
+    # This graph runs on injected models, so from its point of view the
+    # credentials are present. The real check is covered separately.
+    monkeypatch.setattr(
+        app_mod, "settings", replace(app_mod.settings, openai_api_key="test-key")
+    )
 
     try:
         yield TestClient(app_mod.app)
@@ -179,3 +187,22 @@ def test_history_shows_the_checkpoints(api):
     ]
     assert len(checkpoints) > 3
     assert {c["stage"] for c in checkpoints} & {"1-spec-draft", "6-ready"}
+
+
+def test_missing_api_key_is_a_clear_503(api, monkeypatch):
+    """A predictable, user-fixable condition should read as one - not as
+    a 500 carrying a provider stack trace."""
+    monkeypatch.setattr(
+        app_mod, "settings", replace(app_mod.settings, openai_api_key=None)
+    )
+    r = api.post(
+        "/api/v1/threads",
+        headers=TOKEN,
+        json={"feature_id": "crm", "sources": {"prd.md": "# PRD"}},
+    )
+    assert r.status_code == 503
+    assert "OPENAI_API_KEY" in r.json()["detail"]
+
+
+def test_health_reports_whether_credentials_are_present(api):
+    assert api.get("/health").json()["model_credentials"] is True
