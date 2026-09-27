@@ -391,6 +391,146 @@ def check_answers_human(
 
 
 # --------------------------------------------------------------------
+# The E2E failure loop: G_TRIAGE_FIRST, G_LOOP, G_TEST_INTEGRITY
+# --------------------------------------------------------------------
+
+ROUTE_OF_CAUSE = {
+    "impl_bug": "reimplement",
+    "spec_gap": "respec",
+    "test_defect": "fix_test",
+    "environment": "retry",
+}
+
+# Only impl_bug burns loop budget. spec_gap leaves the loop entirely -
+# it goes back to the spec, because letting it retry means the agent
+# fills the gap by guessing and the guess passes the test (SPEC 5.5.2).
+COUNTS_TOWARD_ITERATION = {"impl_bug"}
+
+
+def check_triage_first(sdd: dict[str, Any], analysis: dict | None, e2e: dict) -> GateReject | None:
+    """After qa.failed, diagnose before rebuilding.
+
+    Four causes with four destinations; one reflex response gets three
+    of them wrong. The dangerous one is spec_gap read as impl_bug.
+    """
+    if sdd.get("last_event") != "qa.failed":
+        return None
+    if not analysis:
+        return GateReject(
+            "G_TRIAGE_FIRST", "run e2e-triage before re-implementing", "implement"
+        )
+    if analysis.get("ran_after") != e2e.get("ran_at"):
+        return GateReject(
+            "G_TRIAGE_FIRST", "the diagnosis predates this failure", "implement"
+        )
+    return None
+
+
+def _same_diagnosis_twice(history: list[dict]) -> str | None:
+    """Two consecutive rounds blaming the same test for the same reason.
+
+    That is not a fix that failed - it is a diagnosis that is wrong, and
+    a third attempt at the same repair is waste.
+    """
+    if len(history) < 2:
+        return None
+    a, b = history[-1], history[-2]
+    if a.get("root_cause") != b.get("root_cause"):
+        return None
+    shared = set(a.get("failed_ids") or []) & set(b.get("failed_ids") or [])
+    return f"{sorted(shared)[0]} failed twice as {a.get('root_cause')}" if shared else None
+
+
+def check_loop(
+    iteration: int,
+    max_iterations: int,
+    sdd: dict[str, Any],
+    implementation: dict,
+    e2e: dict,
+    triage_history: list[dict] | None = None,
+) -> GateReject | None:
+    """The five guards, checked before a reimplement (SPEC 5.5.4)."""
+    if iteration >= max_iterations:
+        return GateReject(
+            "G_LOOP", f"loop budget spent {iteration}/{max_iterations}", "implement"
+        )
+
+    if repeated := _same_diagnosis_twice(triage_history or []):
+        return GateReject(
+            "G_LOOP", f"same diagnosis twice - re-diagnose ({repeated})", "implement"
+        )
+
+    at_impl = implementation.get("spec_hash_at_impl")
+    if at_impl and sdd.get("spec_hash") and at_impl != sdd["spec_hash"]:
+        return GateReject(
+            "G_LOOP", "spec changed mid-loop - discard the loop", "implement"
+        )
+
+    prev = e2e.get("prev_passed_count")
+    now = e2e.get("passed_count")
+    if prev is not None and now is not None and now < prev:
+        return GateReject("G_LOOP", f"regression: {prev} passing -> {now}", "implement")
+
+    budget = sdd.get("budget") or {}
+    cap = budget.get("max_usd")
+    if cap is not None and float(budget.get("spent_usd") or 0.0) >= float(cap):
+        return GateReject("G_LOOP", f"budget {budget.get('spent_usd')}/{cap}", "implement")
+
+    return None
+
+
+_TEST_PATHS = re.compile(
+    r"(^|/)(tests?|e2e|__tests__)/|\.(spec|test)\.[jt]sx?$|(^|/)test_[^/]+\.py$"
+)
+
+
+def is_test_path(path: str) -> bool:
+    return bool(_TEST_PATHS.search(path.replace("\\", "/")))
+
+
+def check_test_integrity(
+    skill: str,
+    touched: list[str],
+    route: str | None = None,
+    before: dict[str, int] | None = None,
+    after: dict[str, int] | None = None,
+) -> GateReject | None:
+    """Stop the loop from passing by weakening the tests.
+
+    It will find that path if it can - and pass rate alone makes the
+    result look like success, so this checks the SHAPE of what came out
+    rather than the score.
+    """
+    offending = [p for p in touched if is_test_path(p)]
+
+    if skill == "implement" and offending:
+        return GateReject(
+            "G_TEST_INTEGRITY",
+            f"implement may not modify tests: {', '.join(offending[:3])}",
+            skill,
+        )
+
+    if skill == "qa" and offending and route != "fix_test":
+        return GateReject(
+            "G_TEST_INTEGRITY", "qa may only edit tests when routed to fix_test", skill
+        )
+
+    if skill == "qa" and route == "fix_test" and before and after:
+        for metric, label in (
+            ("tests", "test count"),
+            ("assertions", "assertion count"),
+            ("mapped_acs", "AC mappings"),
+        ):
+            if metric in before and after.get(metric, 0) < before[metric]:
+                return GateReject(
+                    "G_TEST_INTEGRITY",
+                    f"{label} dropped {before[metric]} -> {after.get(metric)}",
+                    skill,
+                )
+    return None
+
+
+# --------------------------------------------------------------------
 # G_VERIFY - the six items
 # --------------------------------------------------------------------
 

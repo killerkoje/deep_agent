@@ -23,6 +23,7 @@ from .llm import get_main_model
 from .nodes.main_agent import make_main_agent_node
 from .state import AgentState
 from .tools.control import fail_run, finish
+from .tools.loop import apply_diagnosis, record_e2e
 from .tools.spawn import spawn
 from .tools.todos import write_todos
 from .tools.verify import check_human_gate, run_verify
@@ -43,6 +44,8 @@ MAIN_TOOLS = [
     spawn,
     run_verify,
     check_human_gate,
+    record_e2e,
+    apply_diagnosis,
     finish,
     fail_run,
 ]

@@ -115,6 +115,14 @@ def spawn(
         catalog=spawnable_ids(),
         known_skills=skills_loader.SKILLS,
     )
+
+    # After a failed E2E run, rebuilding without a diagnosis is how a
+    # spec gap gets filled by a guess (SPEC 5.5.2).
+    if verdict is None and skill == "implement":
+        verdict = gates.check_triage_first(
+            sdd, state.get("analysis"), state.get("e2e") or {}
+        )
+
     if verdict is not None:
         return _reject(verdict, tool_call_id, sdd)
 
@@ -235,3 +243,13 @@ def _check_outputs(
         return gates.check_decisions_logged(sdd.get("decisions") or [])
 
     return None
+
+
+def _check_touched(skill: str, touched: list[str], state: dict) -> gates.GateReject | None:
+    """Did the sub-agent edit files it had no business editing?
+
+    Separate from _check_outputs because it looks at the real workspace,
+    not at state documents.
+    """
+    route = (state.get("analysis") or {}).get("route")
+    return gates.check_test_integrity(skill, touched, route=route)
