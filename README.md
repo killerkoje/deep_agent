@@ -1,10 +1,12 @@
 # Deep Agent — SDD 오케스트레이터
 
-> PRD를 던지면 **스펙 작성 → 구멍 찾기 → 사람 답변 → 권한 검수 → 구현 → E2E**까지 스스로 수행한다.
+> PRD를 던지면 **스펙 작성 → 구멍 찾기 → 결정 → 권한 검수 → 구현 → E2E**까지 스스로 수행한다.
+> 사람은 **자료만** 준다. 빈칸은 AI가 채우되 **근거를 남긴다.**
+> 단 **권한·보안 / 돈·과금** 두 가지는 사람이 정한다 — 틀리면 되돌릴 수 없어서다.
 > 구조는 **Planning + Subagents + Filesystem + Harness** 네 기둥 (+ 장기기억 Store)이다.
 > **런타임:** Python 3.11+ · **LangGraph** · PostgreSQL (checkpointer + pgvector Store) · FastAPI
 
-**Status:** Draft / Spec'd (v0.4 — LangGraph · Store · E2E 실패 정책)
+**Status:** Draft / Spec'd (v0.5 — 무정지 자율 + 권한·과금 정지)
 **구현 계약:** [`docs/SPEC.md`](docs/SPEC.md) ← 개발은 이 문서 기준
 **개념 사전:** [`docs/concepts.md`](docs/concepts.md) ← 용어가 헷갈리면 여기부터
 **학습·도입 플랜:** [`docs/PLAN.md`](docs/PLAN.md) ← Deep Agent → Postgres → K8s
@@ -47,7 +49,54 @@ State 구조                 지금 돌릴지
 ```
 
 즉 **제공된 목표·도구·권한·상태 안에서의 자율성**이다.
-SDD 게이트는 이 울타리이며, 자율성이 추정·스킵으로 새는 것을 코드로 막는다.
+
+### 0.2 빈칸은 AI가 채운다 — 단 두 가지만 빼고
+
+**기본은 무정지다.** 스펙에 빈칸이 있으면 AI가 결정하고 진행한다.
+사람에게 물어보려고 파이프라인을 세우지 않는다.
+
+**근거:** 실측에서 질문 51건 중 **44건**이 코드 확인 / 이미 정한 것에서 유도 /
+기술 판단으로 풀렸다. 사람이 꼭 필요했던 건 **4건**이다.
+86%를 위해 전체를 멈추는 것은 자율 에이전트가 아니다.
+
+**대신 절대 양보하지 않는 것: 추정을 추정이라고 표시한다.**
+
+```
+[AI 결정] 신규 고객 = 이번 달 첫 구매한 고객
+          근거: 3쪽 "구매 이력 기준"에서 유도
+          대안: 가입 기준 (채택 안 함 — 7쪽 집계와 불일치)
+          확신도: 중
+```
+
+메우는 건 괜찮다. **메운 걸 사실인 것처럼 적으면** 6개월 뒤에
+아무도 누가 정했는지 모른다. 근거·대안·확신도가 없는 결정은 코드가 거부한다.
+
+### 0.3 무조건 멈추는 두 가지
+
+| 종류 | 왜 | 틀리면 |
+|------|-----|--------|
+| **권한 · 보안** | 조회 범위 · 역할 · 노출 대상 | 데이터가 **이미 샌 뒤**다 |
+| **돈 · 과금** | 금액 · 정산 · 할인 · 수수료 | 정산이 **이미 나간 뒤**다 |
+
+나머지(화면·용어·집계 방식)는 틀려도 코드를 고치면 된다. 이 둘은 안 된다.
+
+**정지 판단을 AI가 풀 수 없다 — 이중 검사**
+
+```
+① AI가 결정마다 분류를 단다        ("권한" / "과금" / "일반")
+② 게이트가 독립적으로 다시 스캔한다  (스펙 절 위치 + 키워드)
+   → 둘 중 하나라도 걸리면 정지
+```
+
+AI는 정지를 **걸 수는 있어도 풀 수 없다.** 오탐으로 불필요하게 멈추는 건 감수한다.
+반대 방향 실수가 훨씬 비싸다.
+
+**정지 방식**
+
+- **런당 한 번, 모아서** 묻는다. 5번 따로 멈추면 못 쓴다
+- 파이프라인에서 **가장 늦은 지점**(권한 검수 뒤)에 둔다 — 그래야 전부 모인다
+- `interrupt()` → 체크포인트 저장 → 프로세스 죽어도 됨
+- **타임아웃 없음.** 답이 올 때까지 진행하지 않는다
 
 ### 0.2 모델 정책 — 고정표 없음
 
@@ -111,7 +160,7 @@ Main이 그걸 읽고 **스스로 재계획**한다. fail-closed와 자율 재�
 
 | 대상 | 위치 | 이유 |
 |------|------|------|
-| spec.md · questions.md · answers.md · ready.md · report.md | **State `files`** | 체크포인트에 같이 실린다. 작고, 에이전트만 읽는다 |
+| spec.md · questions.md · decisions.md · ready.md · report.md | **State `files`** | 체크포인트에 같이 실린다. 작고, 에이전트만 읽는다 |
 | 대상 레포 코드 · 테스트 산출물 | **실제 디스크** (`target_repo_path`) | git · pytest · **Playwright가 실행해야 한다** |
 
 State 안의 dict는 외부 툴이 읽지 못한다.
@@ -142,10 +191,11 @@ questions.ready
 | 0 | **자료 수집** | 사람 | PRD · 원본문서 · 메일 → `sources/` | |
 | 1 | **스펙 초안** | spawn | `spec.md` (표기 4종) | |
 | 2 | **구멍 찾기** | spawn **×2 병렬** | `questions.md` | |
-| 3 | **답 분류** | spawn | 4갈래 분류 · 사람 질문 확정 | |
-| 4 | **사람 답변** | **사람** | `answers.md` ← **결정의 정본** | `G_ANSWERS_HUMAN` |
-| 5 | **스펙 반영·재검토** | spawn | 갱신된 `spec.md` | |
-| 6 | **권한 검수 (ready)** | spawn | `ready.md` | `G_VERIFY` · `G_READY` |
+| 3 | **결정** | spawn `decide` | **AI가 전부 답함** + 근거·대안·확신도 | `G_DECISION_LOGGED` |
+| 4 | **스펙 반영** | spawn `spec-rereview` | 갱신된 `spec.md` | |
+| 5 | **교차스캔** | spawn `crosscheck` | 절끼리 충돌 → 결정 또는 정지 후보 | |
+| 6 | **권한 검수 (ready)** | spawn `ready-audit` | `ready.md` + 권한·과금 분류 | `G_VERIFY` · `G_READY` |
+| 6b | **사람 정지** | **사람** | 권한·과금 답변만 | `G_HUMAN_GATE` · `G_ANSWERS_HUMAN` |
 | 7 | **구현** | spawn (**단일**) | 브랜치 / patch | `G_NO_IMPL_WITHOUT_VERIFY` |
 | 8 | **QA + E2E** | spawn (**세션 분리**) | `qa-report.md` + Playwright | `G_SESSION_QA` |
 | 8b | **실패 진단** | spawn `e2e-triage` | `FailureAnalysis` | `G_TRIAGE_FIRST` · `G_LOOP` |
@@ -161,17 +211,23 @@ questions.ready
 [Main] spawn(openspec) ∥ spawn(spec-kit)     ← 병렬 · 독립 서브에이전트
    │ questions.ready
    ▼
-[Main] spawn(answer-triage)                  4갈래 분류
-   │ triage.ready
+[Main] spawn(decide)                         AI가 빈칸을 채움 + 근거 기록
+   │ decisions.ready                          ← 멈추지 않는다
    ▼
-   interrupt() ──────────────► [사람] 답변
-   │ answers.ready
-   ▼
-[Main] spawn(spec-rereview)                  답 반영
+[Main] spawn(spec-rereview)                  결정 반영
    │ spec.updated
    ▼
-[Main] spawn(ready-audit)                    권한 검수
-   │ ready.audit.ready → [게이트] verify
+[Main] spawn(crosscheck)                     절끼리 충돌 스캔
+   │ crosscheck.ready
+   ▼
+[Main] spawn(ready-audit)                    권한 검수 + 권한·과금 분류
+   │ ready.audit.ready
+   ▼
+[게이트] 권한·과금 독립 재스캔 (AI 분류와 합집합)
+   ├ 해당 없음 ──────────────────────► verify
+   └ 있음 → interrupt() ──► [사람] 모아서 한 번에 답변
+                              │ human.decided
+                              ▼         (타임아웃 없음)
    ▼ spec.verify.passed
 [Main] spawn(implement)                      백엔드계약 → 저장 → 화면
    │ impl.ready
@@ -211,7 +267,7 @@ questions.ready
 
 상세: [`docs/SPEC.md`](docs/SPEC.md) §5.5
 
-**AI 시작점 = 단계 1.** 사람은 **0(자료)과 4(답변)** 만 한다.
+**AI 시작점 = 단계 1.** 사람은 **0(자료)** 과 **6b(권한·과금 답변)** 만 한다.
 Main은 스펙/코드 **본문을 직접 쓰지 않고**, 세션을 띄워 시킨다.
 
 ### 2.1 단계 2가 병렬인 이유 — 그리고 7이 단일인 이유
@@ -251,18 +307,22 @@ Main은 스펙/코드 **본문을 직접 쓰지 않고**, 세션을 띄워 시�
 
 **단계 6을 가능하게 하는 유일한 장치다.** 스펙의 모든 줄은 출처 등급을 갖는다.
 
-| 표시 | 뜻 | 권한 |
-|------|-----|------|
-| `[코드]` | 현재 코드에서 확인한 사실 | code |
-| `[답변]` | 사람이 직접 정한 것 | **user** |
-| `[스펙 결정]` | 이 문서가 처음 정한 것 | **없음 — 검수 표적** |
-| 표시 없음 | 출처 링크 원문에 근거 있음 | 원본 문서 |
+| 표시 | 뜻 | 권한 | 빈도 |
+|------|-----|------|------|
+| `[코드]` | 현재 코드에서 확인한 사실 | code | |
+| **`[AI 결정]`** | **AI가 정함** — 근거·대안·확신도 **필수** | 없음 — 검수 표적 | **대부분** |
+| `[답변]` | 사람이 직접 정한 것 — **권한·과금만** | **user** | 런당 0~3건 |
+| 표시 없음 | 출처 링크 원문에 근거 있음 | 원본 문서 | |
+
+`[AI 결정]`에 근거·대안·확신도가 없으면 **코드가 거부한다** (`G_DECISION_LOGGED`).
+메우는 건 괜찮다. **메운 걸 사실처럼 적는 것**이 문제다.
 
 ### 3.1 자료 권한 등급 — 자세함도 최신도 권위가 아니다
 
 | 자료 | 권한 |
 |------|------|
-| 답변 기록 (`answers.md`) | **user** |
+| 결정 기록 (`decisions.md`) 중 **사람 답** | **user** |
+| 결정 기록 중 **`[AI 결정]`** | 없음 — 검수 표적 |
 | 요구사항 중 **결정권자 발신** | **user** |
 | 요구사항 중 **개발팀 발신** | — (선택지를 낸 쪽은 결정이 아니다) |
 | 작업명세서·기획서 | spec(초안) |
@@ -276,10 +336,15 @@ Main은 스펙/코드 **본문을 직접 쓰지 않고**, 세션을 띄워 시�
 
 ### 3.2 기록하지 않은 결정은 없는 결정이다
 
-단계 4에서 **정한 것을 전부 `answers.md`에 남긴다.**
-대화에서 정하고 스펙에만 반영하면 `[스펙 결정]`으로 적히고 **누가 정했는지가 사라진다.**
+**모든 결정은 `decisions.md`에 원문으로 남는다.** AI 결정이든 사람 답이든 같다.
+스펙에는 표기와 링크만 달고, **정본은 `decisions.md`** 다.
 
-> 실측: ready가 잡은 「무단 결정」 6건 중 **3건이 이 이유로 오탐**이었다.
+기록을 빼먹으면 `ready-audit`이 그 결정을 **「근거 없는 단정」으로 센다.**
+
+> 실측: ready가 잡은 「무단 결정」 6건 중 **3건이 기록 누락 때문에 오탐**이었다.
+
+사람 답변을 없앴다고 기록까지 없애면 안 된다. **오히려 더 중요해진다** —
+이제 결정의 대부분을 AI가 내리므로, 근거가 없으면 추적할 방법이 아예 사라진다.
 
 ---
 
@@ -367,11 +432,13 @@ SDD 전용 필드(`spec_hash`, `verify_passed`, `spawn_history` …)는 [`docs/S
 |--------|------|------------------|
 | `sources.ready` | 사람 | spawn(spec-write) |
 | `spec.draft.ready` | spec-write | spawn(openspec) ∥ spawn(spec-kit) |
-| `questions.ready` | 구멍찾기 | spawn(answer-triage) |
-| `triage.ready` | answer-triage | **interrupt()** — 사람 대기 |
-| `answers.ready` | 사람 | spawn(spec-rereview) |
-| `spec.updated` | spec-rereview | spawn(ready-audit) |
-| `ready.audit.ready` | ready-audit | **게이트** verify 실행 |
+| `questions.ready` | 구멍찾기 | spawn(`decide`) |
+| `decisions.ready` | decide | spawn(spec-rereview) — **멈추지 않음** |
+| `spec.updated` | spec-rereview | spawn(`crosscheck`) |
+| `crosscheck.ready` | crosscheck | spawn(ready-audit) |
+| `ready.audit.ready` | ready-audit | **게이트** 권한·과금 재스캔 |
+| `human.gate.raised` | gate | **interrupt()** — 모아서 한 번 |
+| `human.decided` | 사람 | verify 실행 |
 | `spec.verify.passed` | 게이트 | spawn(implement) 허용 |
 | `spec.verify.failed` | 게이트 | 재계획 / 재질문 루프 |
 | `impl.ready` | implement | spawn(qa) — 새 세션 |
@@ -390,7 +457,9 @@ SDD 전용 필드(`spec_hash`, `verify_passed`, `spawn_history` …)는 [`docs/S
 | Gate | 언제 | 막는 것 |
 |------|------|---------|
 | `G_MODEL_KNOWN` | 모든 spawn | 카탈로그에 없는 모델 |
-| `G_ANSWERS_HUMAN` | answers 수신 | AI가 답을 채우는 것 |
+| **`G_DECISION_LOGGED`** | decide / rereview 산출물 | 근거·대안·확신도 없는 `[AI 결정]` |
+| **`G_HUMAN_GATE`** | verify 직전 | 권한·과금 결정이 **미답인 채** 진행 |
+| `G_ANSWERS_HUMAN` | 권한·과금 답변 수신 | **AI가 그 답을 채우는 것** |
 | `G_VERIFY` | ready-audit 후 | 6항 미충족 스펙 |
 | `G_READY` | implement 전 | ready 1절(남은 문제)이 안 비었는데 진행 |
 | `G_NO_IMPL_WITHOUT_VERIFY` | spawn implement/qa | 미검증 스펙으로 구현 |
@@ -399,7 +468,8 @@ SDD 전용 필드(`spec_hash`, `verify_passed`, `spawn_history` …)는 [`docs/S
 
 **Deep이 되어도 안 푸는 SDD 제약**
 
-- 빈 칸 추정 금지 · 답은 사람
+- **추정은 하되 추정이라고 표시** — 근거 없는 결정은 거부
+- **권한·보안 / 돈·과금은 사람** — AI가 정지를 풀 수 없다
 - `verify_passed` 없이 implement 불가
 - QA ≠ Writer (세션 분리)
 - 서브는 다음 단계를 직접 호출하지 않음 — **요약 반환만**
@@ -439,6 +509,7 @@ SDD 전용 필드(`spec_hash`, `verify_passed`, `spawn_history` …)는 [`docs/S
 - [x] **v0.2 — LangGraph 채택, 네 기둥 구조, 볼트 SDD 워크플로 흡수**
 - [x] **v0.3 — Store(장기기억) + pgvector, openspec/spec-kit CLI, OpenAI 모델 고정**
 - [x] **v0.4 — E2E 실패 정책 (원인 4종 → 경로 4종), 루프 가드 5종, `e2e-triage`**
+- [x] **v0.5 — 무정지 자율 결정 + 권한·과금만 정지, `[AI 결정]` 표기, `crosscheck`**
 
 ### Phase 1 — 최소 루프 (InMemorySaver)
 
@@ -450,9 +521,10 @@ SDD 전용 필드(`spec_hash`, `verify_passed`, `spawn_history` …)는 [`docs/S
 
 ### Phase 2 — SDD 파이프라인
 
-- [ ] 스킬 `SKILL.md` 9종 (spec-write / openspec / spec-kit / answer-triage / spec-rereview / ready-audit / implement / qa / **e2e-triage**)
-- [ ] 표기 4종 검사 스크립트
-- [ ] `interrupt()` 사람 답변 + `Command(resume=…)`
+- [ ] 스킬 `SKILL.md` 10종 (spec-write / openspec / spec-kit / **decide** / spec-rereview / **crosscheck** / ready-audit / implement / qa / e2e-triage)
+- [ ] 표기 검사 스크립트 (`[AI 결정]` 근거·대안·확신도)
+- [ ] 권한·과금 **이중 검사** (AI 분류 ∪ 게이트 스캔)
+- [ ] `interrupt()` 권한·과금 정지 + `Command(resume=…)`
 - [ ] verify 6항 게이트 스크립트
 
 ### Phase 3 — 영속화 (단기)
@@ -490,9 +562,11 @@ SDD 전용 필드(`spec_hash`, `verify_passed`, `spawn_history` …)는 [`docs/S
 
 ## 10. 성공 기준
 
-1. 자료·답변 외 **빈 칸 추정 0**
-2. `verify_passed` 없이 implement spawn을 **코드가 거부**
-3. 2→3→4→5→6이 **파일로 분리**되어 추적 가능
+1. **모든 `[AI 결정]`에 근거·대안·확신도가 있다** — 없으면 코드가 거부
+2. **권한·과금 결정이 미답이면 verify가 통과하지 않는다**
+3. **AI가 자기 결정을 「일반」으로 분류해도 게이트가 독립적으로 잡는다**
+4. `verify_passed` 없이 implement spawn을 **코드가 거부**
+5. 2→3→4→5→6이 **파일로 분리**되어 추적 가능
 4. ready 검수 **1절이 비어야** 구현으로 넘어간다
 5. `thread_id`로 자료→질문→답변→스펙해시→구현→QA→보고 연결
 6. **프로세스를 죽였다 켜도** 같은 `thread_id`로 이어진다
@@ -506,7 +580,8 @@ SDD 전용 필드(`spec_hash`, `verify_passed`, `spawn_history` …)는 [`docs/S
 ## 11. 비목표
 
 - PRD까지 AI가 단독 확정
-- 사람 답 없이 스펙 PASS
+- **권한·과금을 AI가 단독 확정**
+- 근거 없는 `[AI 결정]`을 통과시키는 것
 - **구현을 병렬 서브에이전트로 쪼개기**
 - `deepagents` 패키지 도입
 - 역할별 모델 고정 배치표
@@ -521,15 +596,17 @@ SDD 전용 필드(`spec_hash`, `verify_passed`, `spawn_history` …)는 [`docs/S
 |--------|------|
 | **서브 messages가 부모에 병합됨** | spawn은 **툴**로. 별도 graph invoke. 요약만 반환 |
 | **체크포인트 비대화** | 코드는 State에 넣지 않는다 (하이브리드 FS) |
-| AI가 답 칸을 채움 | `G_ANSWERS_HUMAN` + CI 검사 |
-| 결정을 기록 안 함 | 4단계 필수. 없으면 6단계 오탐 폭증 |
+| **AI가 권한·과금까지 결정** | 게이트 **독립 재스캔** — AI 분류를 믿지 않는다 |
+| **AI가 근거 없이 단정** | `G_DECISION_LOGGED` — 근거·대안·확신도 필수 |
+| 결정을 기록 안 함 | `decisions.md`가 정본. 없으면 ready 오탐 폭증 |
+| 정지가 너무 잦아 못 씀 | **런당 한 번, 가장 늦은 지점에서 모아서** |
 | 스펙 드리프트 | spec hash + 하위 invalidate |
 | 프롬프트만 게이트 | fail-closed 스크립트 |
 | Main이 일을 가로챔 | write 툴을 **주지 않는다** |
 | 긴 런에서 목표 표류 | todos **재주입**(recitation) |
 | 컨텍스트 폭발 | 압축 전략 (Phase 3) |
 | **Store 오염 — 틀린 기억이 다음 run을 망침** | `evidence` 필수 · `confirmed`(2회 재현)만 자동 주입 · org 격리 |
-| **과거 답을 사람 답인 척 재사용** | **`answers.md`는 Store에 저장 금지.** 패턴만 남긴다 |
+| **AI 결정을 사람 답인 척 재사용** | 권한·과금 **사람 답만** Store 저장 금지. `[AI 결정]`은 저장해 일관성 유지 |
 | LLM이 셸을 임의 실행 | `sdd_cli.py` **allowlist** — openspec/specify/playwright/git만 |
 | **E2E 실패를 추정으로 덮음** (`spec_gap` 오진) | `G_TRIAGE_FIRST` · triage 프롬프트에서 `impl_bug` 기본분류 금지 |
 | **테스트를 약화시켜 통과** | `G_TEST_INTEGRITY` — AC매핑·테스트수·assertion수 감소 거부 |

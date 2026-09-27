@@ -4,7 +4,13 @@
   "title": "DeepAgentEvent",
   "description": "Input signals to Main. An event never invokes the next skill directly - Main decides via spawn.",
   "type": "object",
-  "required": ["event", "run_id", "feature_id", "ts", "actor"],
+  "required": [
+    "event",
+    "run_id",
+    "feature_id",
+    "ts",
+    "actor"
+  ],
   "properties": {
     "event": {
       "type": "string",
@@ -12,9 +18,11 @@
         "sources.ready",
         "spec.draft.ready",
         "questions.ready",
-        "triage.ready",
-        "answers.ready",
+        "decisions.ready",
+        "human.decided",
         "spec.updated",
+        "crosscheck.ready",
+        "human.gate.raised",
         "ready.audit.ready",
         "spec.verify.passed",
         "spec.verify.failed",
@@ -24,10 +32,24 @@
         "run.report.ready"
       ]
     },
-    "run_id": { "type": "string", "minLength": 1 },
-    "thread_id": { "type": ["string", "null"] },
-    "feature_id": { "type": "string", "minLength": 1 },
-    "ts": { "type": "string", "format": "date-time" },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "thread_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "feature_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time"
+    },
     "actor": {
       "type": "string",
       "description": "human | main | gate | skill id",
@@ -38,7 +60,8 @@
         "spec-write",
         "openspec",
         "spec-kit",
-        "answer-triage",
+        "decide",
+        "crosscheck",
         "spec-rereview",
         "ready-audit",
         "implement",
@@ -46,32 +69,66 @@
       ]
     },
     "spec_ref": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "path@sha256:..."
     },
     "spawn_id": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Idempotency key. Re-delivery of the same spawn_id is ignored"
     },
     "artifacts": {
       "type": "object",
-      "additionalProperties": { "type": "string" }
+      "additionalProperties": {
+        "type": "string"
+      }
     },
     "reasons": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "description": "verify / qa failure reasons, fed back to Main for replanning"
     },
     "ready_open_count": {
-      "type": ["integer", "null"],
+      "type": [
+        "integer",
+        "null"
+      ],
       "minimum": 0,
       "description": "Set by ready.audit.ready"
     },
-    "pr_url": { "type": ["string", "null"] },
-    "patch_path": { "type": ["string", "null"] },
+    "pr_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "patch_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "e2e_report": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Playwright result path, set by qa.*"
+    },
+    "human_gate_items": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "Count of unanswered permission/billing decisions. Set by human.gate.raised; must be 0 before spec.verify.passed"
     }
   },
   "additionalProperties": false

@@ -3,7 +3,7 @@
 본 문서는 [`SPEC.md`](SPEC.md) §11의 구현 상세다.
 **게이트는 코드다.** 모델이 "PASS"라고 말해도 파일이/플래그가 없으면 통과가 아니다.
 
-**상태:** v0.4 · 2026-09-23
+**상태:** v0.5 · 2026-09-27
 
 ---
 
@@ -100,16 +100,93 @@ class GateReject:
 
 ---
 
-## 5. G_ANSWERS_HUMAN
+## 5. G_DECISION_LOGGED (v0.5 신규)
 
-**When:** `POST /threads/{tid}/answers` 또는 `answers.ready` 이벤트
+**v0.5에서 빈칸은 AI가 채운다.** 그래서 「채웠느냐」가 아니라
+**「채운 근거를 남겼느냐」** 가 게이트가 된다.
+
+**When:** `decide` / `spec-rereview` / `crosscheck` 산출물 검사
+
+**Check — `[AI 결정]` 전건**
+
+1. `근거:` 가 비어 있지 않을 것
+2. 근거가 **인용**일 것 — `파일#L숫자` 링크 또는 `D-nnn` 참조가 있을 것
+3. `대안:` 이 있을 것 (없으면 `대안: 없음 — 이유`)
+4. `확신도:` 가 `상|중|하` 중 하나일 것
+5. 금지 문구 — `합리적이므로`, `일반적으로`, `관례상` 만으로 끝나는 근거
+
+**Fail:** `GateReject("G_DECISION_LOGGED", "D-012: 근거가 인용이 아님")`
+
+> **왜 이게 핵심 게이트가 됐나** — 메우는 것 자체는 괜찮다.
+> **메운 걸 사실처럼 적는 것**이 문제다. 근거가 없으면 6개월 뒤에
+> 누가 정했는지 추적할 방법이 아예 사라진다.
+> 사람 답변을 없앤 만큼 이 게이트가 그 자리를 대신한다.
+
+---
+
+## 5.1 G_HUMAN_GATE (v0.5 신규) — 권한·과금만 정지
+
+**When:** `verify_spec()` 직전 (ready-audit 뒤)
+
+**Check:** 권한·과금 결정이 **전부 답변되었을 것**
+
+```python
+def human_gate(state) -> GateReject | None:
+    items = human_gate_items(state)          # ★ 합집합 (아래)
+    unanswered = [i for i in items if not i.get("answer")]
+    if unanswered:
+        return GateReject("G_HUMAN_GATE", f"권한·과금 미답 {len(unanswered)}건")
+    return None
+
+
+def human_gate_items(state) -> list[dict]:
+    ai_flagged   = [d for d in state["sdd"]["decisions"]
+                    if d["category"] in {"권한", "과금"}]
+    gate_flagged = scan_sensitive(state["files"]["spec.md"],
+                                  state["files"]["decisions.md"])
+    return dedupe(ai_flagged + gate_flagged)   # 교집합 아님
+```
+
+### 5.1.1 AI 분류를 신뢰하지 않는다
+
+AI가 "이건 권한 아닙니다" 하고 넘어가면 정지가 무력화된다.
+**자기가 멈출지 말지를 자기가 정하는 구조는 게이트가 아니다.**
+
+**합집합이므로 둘 중 하나만 걸어도 멈춘다.**
+오탐으로 불필요하게 멈추는 건 감수한다 — 반대 방향 실수가 훨씬 비싸다.
+
+`scan_sensitive()`가 보는 축:
+
+| 축 | 신호 |
+|----|------|
+| **위치** | 보일러플레이트 **§6 권한·보안** 절에 속한 결정 |
+| **권한 어휘** | 역할 · 조회 범위 · 노출 대상 · 마스킹 · `isAdmin` 류 심볼 |
+| **금액 어휘** | 금액 · 정산 · 차감 · 할인 · 수수료 · 환불 · 과금 주기 |
+
+어휘는 `config/sensitive_terms.json`에 두고 프로젝트마다 늘린다.
+
+### 5.1.2 정지 방식
+
+- **런당 한 번, 모아서.** 5번 따로 멈추면 못 쓴다
+- **가장 늦은 지점**(ready-audit 뒤) — 그래야 후보가 전부 모인다
+- `interrupt()` → 체크포인트 저장 → **프로세스 죽어도 됨**
+- **타임아웃 없음.** "며칠 지났으니 추천안으로"를 넣으면 정지의 의미가 사라진다
+
+---
+
+## 5.2 G_ANSWERS_HUMAN (범위 축소)
+
+v0.5에서 이 게이트는 **권한·과금 답변에만** 적용된다.
+나머지 결정은 AI가 하므로 검사 대상이 아니다.
+
+**When:** `POST /threads/{tid}/human-gate`
 
 **Check:**
 
 1. 제출 경로가 **human 엔드포인트**일 것 (subagent가 쓰면 거부)
-2. `actor` 필드가 skill id면 거부
-3. `답:` 뒤에 내용이 있는 줄 **≥ 1**
-4. 추정 흔적 패턴 금지 — `답: (추정)`, `답: TODO-AI`, `답: AI 판단`
+2. `actor`가 skill id면 거부
+3. **부분 답변 거부** — 대기 중인 항목 전부에 답이 있을 것
+4. 추정 흔적 금지 — `(추정)`, `TODO-AI`, `AI 판단`
 
 **Fail:** HTTP 400 + 감사 기록
 
@@ -137,7 +214,7 @@ brief를 고쳐 다시 시도한다.
 > **프롬프트 판정이 아닌 게이트를 하나 더 얻는 것**이므로 반드시 건다.
 
 **주의:** `spec-kit` 쪽에는 대응하는 validate가 없다.
-spec-kit 산출물은 `answer-triage`가 병합할 때 형식 검사만 한다.
+spec-kit 산출물은 `decide`가 병합할 때 형식 검사만 한다.
 
 ---
 
@@ -150,17 +227,21 @@ spec-kit 산출물은 `answer-triage`가 병합할 때 형식 검사만 한다.
 1. 호출자가 **Main**일 것 — 서브에이전트 툴 목록에 `remember`가 없다
 2. `sdd.stage == "9-report"` 이후일 것 — **런 도중 저장 금지**
 3. `evidence`와 `source_run_id`가 **비어 있지 않을** 것
-4. 저장하려는 `text`가 `answers.md` 내용과 **일치하지 않을** 것
+4. 저장하려는 `text`가 **권한·과금 사람 답변**과 **일치하지 않을** 것
 
 **Fail:** `GateReject("G_STORE_WRITE", reason)`
 
-> **4번이 핵심이다.** 사람 답변을 Store에 넣으면
-> 다음 run에서 과거 답이 **사람 답인 것처럼** 재사용되고,
-> 「답은 사람이 한다」는 SDD 제약이 조용히 무력화된다.
-> Store에 남기는 것은 **패턴**이지 **답**이 아니다.
+> **4번이 핵심이다.** 권한·과금에 대한 사람 답변을 Store에 넣으면
+> 다음 run에서 과거 답이 **사람이 답한 것처럼** 재사용되고,
+> `G_HUMAN_GATE`가 조용히 무력화된다. 권한은 **매번** 사람이 정한다.
+> Store에 남기는 것은 「이런 권한 충돌이 반복된다」는 **패턴**이지 **답**이 아니다.
+>
+> **`[AI 결정]`은 반대로 저장한다 (v0.5).** "이 프로젝트에서 신규 고객은
+> 첫 구매 기준"이 기억에 남아야 다음 run에서 **같은 용어를 다르게 정의하지 않는다.**
+> 일관성이 자율 결정 구조의 생명이다.
 
-**MVP 검사:** `normalize(text)`가 `answers.md`의 어떤 `답:` 값과
-90% 이상 일치하면 거부.
+**MVP 검사:** `normalize(text)`가 `decisions.md`의 **`[답변]` 태그** 항목과
+90% 이상 일치하면 거부. `[AI 결정]` 항목은 저장 허용.
 
 ---
 
@@ -175,8 +256,8 @@ spec-kit 산출물은 `answer-triage`가 병합할 때 형식 검사만 한다.
 |---|------|----------------|
 | 1 | 인수조건 판별/계산/출처 | `spec.md`에 `AC-` 또는 `### n.m` 세부태스크가 있고, 각 항목에 `처리:`·`성공:`·`출처:` 중 **2개 이상** 존재 (정규식) |
 | 2 | 분기 조건 | 본문에 `또는`/`라면`이 있으면 같은 절에 `조건:` 또는 분기 표가 있을 것. 위반 목록 출력 |
-| 3 | 절 간 모순 0 | **MVP:** `files["meta/human-crosscheck.ok"]` 존재 여부. 없으면 failed (§15 Q2) |
-| 4 | 추정 답 0 | `questions.md`/`answers.md`에 `답: (추정)` / `답: TODO-AI` 패턴 **없음** |
+| 3 | 절 간 모순 0 | **Q2 확정:** ① `files["meta/crosscheck.json"]` 존재(실행 증거, `spawn_id` 포함) **AND** ② `decisions.md`의 `[CROSS]` 항목이 **전건 닫힘**. 「사람이 봤다는 파일」은 폐기 |
+| 4 | **근거 없는 결정 0** | `[AI 결정]` 전건에 근거(인용)·대안·확신도. `G_DECISION_LOGGED`와 동일 검사 |
 | 5 | 잔여 차단 질문 0 | `questions.md`에 `차단: true` 또는 `[BLOCKING]` 중 미답 **없음** |
 | 6 | 토큰 + hash | `sha256(spec.md)` 기록 + `meta/verify-token`에 `VERIFY_OK:{run_id}:{hash}` |
 
@@ -213,7 +294,7 @@ Main은 reasons를 보고 **재질문 루프** 또는 **spec-rereview 재spawn**
 > **왜 이 게이트가 필요한가** — 실패 원인은 4종인데 대응이 전부 다르다 (SPEC §5.5.2).
 > 진단 없이 재구현으로 직행하면 `spec_gap`(스펙 빈칸)이 **추정으로 메워지고**,
 > 그 추정이 테스트를 통과하는 순간 **추정이 사실상의 스펙이 된다.**
-> `G_ANSWERS_HUMAN` / `G_VERIFY` / `G_READY`가 막으려던 실패가
+> `G_HUMAN_GATE` / `G_VERIFY` / `G_READY`가 막으려던 실패가
 > **E2E 루프를 통해 우회되는 경로**다. 여기서 끊는다.
 
 ---
@@ -334,7 +415,14 @@ then   부모 messages 증가분 == ToolMessage 1개
 | 1 | verify=false + spawn implement | GateReject ToolMessage |
 | 2 | spec.md 수정 후 hash 불일치 | reject + `verify_passed=false` |
 | 3 | `ready_open_count=2` + spawn implement | `G_READY` reject |
-| 4 | subagent가 answers 제출 | 400 |
+| 4 | subagent가 human-gate 답변 제출 | 400 |
+| 4b | **근거 없는 `[AI 결정]`** | `G_DECISION_LOGGED` reject |
+| 4c | 근거가 "합리적이므로"뿐 | `G_DECISION_LOGGED` reject |
+| 4d | **권한 결정을 AI가 「일반」으로 분류** | **게이트 재스캔이 잡아 정지** |
+| 4e | 권한·과금 미답 상태로 verify | `G_HUMAN_GATE` reject |
+| 4f | 권한 3건 중 2건만 답변 | 400 (부분 답변 거부) |
+| 4g | `crosscheck.json` 없이 verify | 3항 failed |
+| 4h | `[CROSS]` 미답 1건 남음 | 3항 failed |
 | 5 | 카탈로그에 없는 모델 | `G_MODEL_KNOWN` reject |
 | 6 | verify-token 없음 | `spec.verify.failed` |
 | 7 | qa spawn이 implement transcript 주입 | `G_SESSION_QA` reject |
@@ -343,7 +431,8 @@ then   부모 messages 증가분 == ToolMessage 1개
 | 10 | `gates.py`에 `langgraph` import | CI grep 실패 |
 | 11 | `openspec validate --strict` 실패 산출물 | `G_OPENSPEC_VALID` reject |
 | 12 | **서브에이전트가 `remember` 호출** | 툴 자체가 없음 (AttributeError 아닌 미등록) |
-| 13 | **`answers.md` 문장을 `remember`로 저장 시도** | `G_STORE_WRITE` reject |
+| 13 | **권한·과금 사람 답을 `remember`로 저장 시도** | `G_STORE_WRITE` reject |
+| 13b | `[AI 결정]`을 `remember`로 저장 | **허용** (일관성 유지) |
 | 14 | `evidence` 없는 `remember` | reject |
 | 15 | 셸 allowlist 밖 명령 (`rm -rf` 등) | 거부 · 실행 안 됨 |
 | 16 | `qa.failed` 직후 `implement` spawn | `G_TRIAGE_FIRST` reject |
@@ -402,4 +491,5 @@ def allow_spawn(sdd: dict, skill: str, model: str, catalog: set[str]) -> GateRej
 | 0.1 | 2026-09-22 | 초안 |
 | 0.2 | 2026-09-23 | 거부를 **ToolMessage**로 변경, `G_READY` 신설, 격리 테스트 필수화, `gates.py` 순수성 조항 |
 | 0.3 | 2026-09-23 | **`G_OPENSPEC_VALID`** (CLI 결정적 검증), **`G_STORE_WRITE`** (장기기억 오염·answers 승격 방지), 셸 allowlist 테스트 |
+| 0.5 | 2026-09-27 | **`G_DECISION_LOGGED`**(근거 없는 `[AI 결정]` 거부), **`G_HUMAN_GATE`**(권한·과금만 정지 · AI 분류와 **합집합** 재스캔), `G_ANSWERS_HUMAN` 범위 축소, verify 3·4항 재정의(Q2 확정) |
 | 0.4 | 2026-09-23 | **E2E 실패 루프 게이트 3종** — `G_TRIAGE_FIRST`(진단 없이 재구현 금지), `G_LOOP`(가드 5종·회귀·같은진단 2연속), `G_TEST_INTEGRITY`(테스트 약화로 통과 조작 방지) |

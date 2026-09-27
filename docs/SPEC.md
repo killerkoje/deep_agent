@@ -2,10 +2,18 @@
 
 **문서 목적:** README 정책을 **바로 구현할 수 있는 수준**으로 고정한다.
 **읽는 법:** 위에서 아래로 한 장씩. 구현은 §14 순서대로.
-**상태:** Draft v0.4 · 2026-09-23
+**상태:** Draft v0.5 · 2026-09-27
 **근거:** [`README.md`](../README.md), [`concepts.md`](concepts.md), [`deep-review.md`](deep-review.md)
 **엔진:** **LangGraph 사용.** `deepagents` 패키지는 미사용 (§2.2)
 
+> **v0.4 → v0.5 변경 요약**
+> **사람 사전 답변 제거.** 빈칸은 AI가 결정하고 **근거를 남긴다** (§10.3)
+> **권한·보안 / 돈·과금만 정지** — 게이트가 **독립 재스캔**, AI가 못 푼다 (§11.2)
+> 표기 `[스펙 결정]` → **`[AI 결정]`** (근거·대안·확신도 필수)
+> `answers.md` → **`decisions.md`** (AI 결정 + 사람 답을 한 파일에)
+> `answer-triage` → **`decide`**, **`crosscheck`** 신설 (Q2 결정) → 스킬 10종
+> `G_DECISION_LOGGED` · `G_HUMAN_GATE` 신설, `G_ANSWERS_HUMAN` 범위 축소
+>
 > **v0.2 → v0.3 변경 요약**
 > **Store(장기기억) 범위 편입** — Checkpoint와 분리된 `BaseStore` (§5.4, §12.4)
 > **pgvector 채택** — 보류 철회. 과거 FAIL 회수·판례 검색 (§12.3)
@@ -34,7 +42,7 @@
 | §7 | HTTP API | 구현 |
 | §8 | **그래프 · 에이전트 루프** | 핵심 |
 | §9 | **`spawn` — 서브에이전트 격리** | 핵심 |
-| §10 | 스킬 9종 계약 | 스킬 담당 |
+| §10 | 스킬 10종 계약 | 스킬 담당 |
 | §11 | 게이트 | 필수 |
 | §12 | 압축 · 영속화 | Phase 3 |
 | §13 | 인수조건 · 비목표 | QA |
@@ -57,9 +65,13 @@
 
 ### 1.1 진실
 
-사람은 **자료(PRD·원본문서)** 와 **질문 답**만 쓴다.
+사람은 **자료(PRD·원본문서)** 를 준다. 그게 기본이다.
 **LangGraph 그래프 안의 Main 에이전트**가 매 턴 **스킬 + 모델**을 골라
-**격리된 서브 세션**을 띄우고, SDD 게이트를 코드로 강제한다.
+**격리된 서브 세션**을 띄우고, 빈칸은 **AI가 결정하되 근거를 남긴다.**
+
+**단 두 가지 — 권한·보안, 돈·과금 — 만 사람이 정한다.**
+틀리면 되돌릴 수 없기 때문이고, **AI는 그 정지를 풀 권한이 없다.**
+
 역할→모델 고정표는 없다.
 
 ### 1.2 용어
@@ -75,7 +87,9 @@
 | **subagent** | spawn으로 뜬 한 세션. 끝나면 **요약 문자열만** 반환 |
 | **gate** | 코드 fail-closed 검사. 프롬프트만으로 PASS 불가 |
 | **run** | 하나의 피처 오케스트레이션 단위. `run_id` = SDD 메타 키 |
-| **표기 4종** | `[코드]` / `[답변]` / `[스펙 결정]` / 무표시 — 권한 등급 |
+| **표기 4종** | `[코드]` / **`[AI 결정]`** / `[답변]` / 무표시 — 권한 등급 |
+| **`[AI 결정]`** | AI가 빈칸을 메운 것. **근거·대안·확신도 필수** |
+| **human gate** | 권한·과금 결정에서만 걸리는 정지. 런당 한 번, 모아서 |
 | **ready** | 단계 6 권한 검수. 「채워졌는데 근거 없는 것」을 찾는다 |
 
 > **`thread_id` vs `run_id`** — 하나의 run은 하나의 thread로 시작한다.
@@ -159,7 +173,7 @@
 ### 3.1 In scope
 
 - 그래프 · 툴 · 서브에이전트 격리 · 게이트 · 감사 · 토탈 보고
-- 스킬 프롬프트/툴 바인딩 (9종)
+- 스킬 프롬프트/툴 바인딩 (10종)
 - 사람 답변 수신 + resume
 - 가용 모델 목록 노출
 - 체크포인트 영속화 (thread 단위)
@@ -209,7 +223,8 @@
 │   ├── spec-write/SKILL.md
 │   ├── openspec/SKILL.md
 │   ├── spec-kit/SKILL.md
-│   ├── answer-triage/SKILL.md
+│   ├── decide/SKILL.md
+│   ├── crosscheck/SKILL.md
 │   ├── spec-rereview/SKILL.md
 │   ├── ready-audit/SKILL.md
 │   ├── implement/SKILL.md
@@ -313,7 +328,9 @@ class AgentState(TypedDict):
 | `ready_open_count` | int\|null | ready 1절 남은 문제 수. **0이어야 구현 가능** |
 | `last_event` | string\|null | |
 | `spawn_history` | array | `{spawn_id, skill, model, brief, at, result, tokens, cost_usd}` |
-| `waiting_for` | string\|null | `answers` \| `sources` |
+| `waiting_for` | string\|null | `human_gate` \| `sources` |
+| `human_gate` | object\|null | `{items: [...], raised_at, answered_at}` — 권한·과금 정지 (§11.2) |
+| `decisions` | array | `{id, tag, text, rationale, alternatives, confidence, category, by}` |
 | `target_repo_path` | string\|null | implement 대상 |
 | `budget` | object | `{max_usd?, spent_usd}` |
 | `gate_rejects` | array | 최근 거부 (Main 컨텍스트에 주입) |
@@ -325,7 +342,7 @@ class AgentState(TypedDict):
 
 | 대상 | 위치 | 접근 |
 |------|------|------|
-| `spec.md` `questions.md` `answers.md` `ready.md` `qa-report.md` `report.md` | **State `files`** | `tools/fs.py` |
+| `spec.md` `questions.md` `decisions.md` `ready.md` `qa-report.md` `report.md` | **State `files`** | `tools/fs.py` |
 | `sources/*` (PRD·원본·메일) | State `files` | 읽기 전용 |
 | **대상 레포 코드 · 빌드 산출물 · Playwright 결과** | **실제 디스크** `workspace/{run_id}/` 또는 `target_repo_path` | subagent의 shell/파일 툴 |
 
@@ -334,7 +351,7 @@ class AgentState(TypedDict):
 1. **코드를 State `files`에 넣지 않는다.** 체크포인트가 매 스텝 비대해진다.
 2. State `files`의 한 파일은 **256KB 이하**. 초과 시 디스크로 내린다.
 3. Main은 `files`에 **직접 write하지 않는다** (write 툴을 안 준다).
-4. `answers.md`는 **사람 API로만** 채워진다.
+4. `decisions.md`의 **권한·과금 항목**은 사람 API로만 채워진다. 나머지는 `decide` 스킬이 쓴다.
 5. `spec.md`가 바뀌면 `spec_hash` 재계산 + `verify_passed=false` + 하위 invalidate.
 
 ### 5.4 Store — 장기 기억 (v0.3 신규)
@@ -383,12 +400,16 @@ class AgentState(TypedDict):
 |--|------|
 | **누가** | **Main만.** `remember` 툴. 서브에이전트는 Store에 쓰지 못한다 |
 | **언제** | 단계 9(토탈 보고) 직후. 런 도중에는 쓰지 않는다 |
-| **무엇을** | 일반화되는 것 — 반복될 실패 원인, 확정된 컨벤션, 판례 |
-| **무엇을 안 쓰나** | **`answers.md`의 사람 답변.** 그건 이 run 고유의 결정이지 일반 지식이 아니다 |
+| **무엇을** | 일반화되는 것 — 반복될 실패 원인, 확정된 컨벤션, 판례, **`[AI 결정]`** |
+| **무엇을 안 쓰나** | **권한·과금에 대한 사람 답변.** 그건 이 run 고유의 결정이다 |
 
-> **왜 answers를 Store에 안 넣나** — 다음 run에서 비슷한 질문이 나왔을 때
-> 과거 답을 **사람 답변인 것처럼** 재사용하면 `G_ANSWERS_HUMAN`이 무력화된다.
-> 답은 매번 사람이 한다. Store에 남기는 것은 「이런 구멍이 반복된다」는 **패턴**뿐이다.
+> **`[AI 결정]`은 저장한다 (v0.5 변경)** — "이 프로젝트에서 신규 고객은 첫 구매 기준"
+> 같은 결정이 기억에 남아야 다음 run에서 **같은 용어를 다르게 정의하지 않는다.**
+> 일관성이 자율 결정 구조의 생명이다.
+>
+> **권한·과금 사람 답은 저장하지 않는다** — 다음 run에서 과거 답을
+> **사람이 답한 것처럼** 재사용하면 `G_HUMAN_GATE`가 무력화된다.
+> 권한은 매번 사람이 정한다. Store에는 「이런 권한 충돌이 반복된다」는 **패턴**만 남긴다.
 
 #### 5.4.4 읽기 정책
 
@@ -400,7 +421,7 @@ class AgentState(TypedDict):
 | 보고 (단계 9) | `preferences` | 형식 |
 
 **회수 결과는 근거가 아니라 참고다.** Store에서 나온 문장은
-`[스펙 결정]`으로 취급하며, `[답변]`으로 승격할 수 없다.
+`[AI 결정]`으로 취급하며, `[답변]`으로 승격할 수 없다.
 
 #### 5.4.5 오염 방지
 
@@ -463,7 +484,7 @@ Playwright `trace.zip`은 수십 MB라 체크포인트에 넣으면 즉사한다
 
 > **`spec_gap`에서 implement로 돌아가면 안 되는 이유**
 > 돌아가면 AI가 빈칸을 **추정으로 메운다.** 그 추정이 테스트를 통과하는 순간
-> **추정이 사실상의 스펙이 된다.** `G_ANSWERS_HUMAN`·`G_VERIFY`·`G_READY`가
+> **추정이 사실상의 스펙이 된다.** `G_HUMAN_GATE`·`G_VERIFY`·`G_READY`가
 > 막으려던 실패가 E2E 루프로 우회되는 경로다.
 > 그래서 `spec_gap`은 iteration을 올리지 않고 **루프를 빠져나가** 단계 3~6으로 되돌린다.
 
@@ -508,11 +529,13 @@ Playwright `trace.zip`은 수십 MB라 체크포인트에 넣으면 즉사한다
 |-------|--------|----------------|
 | `sources.ready` | human | spawn `spec-write` |
 | `spec.draft.ready` | spec-write | spawn `openspec` ∥ `spec-kit` |
-| `questions.ready` | openspec / spec-kit | 둘 다 끝나면 spawn `answer-triage` |
-| `triage.ready` | answer-triage | **`wait_human`** → interrupt |
-| `answers.ready` | human | spawn `spec-rereview` |
-| `spec.updated` | spec-rereview | spawn `ready-audit` |
-| `ready.audit.ready` | ready-audit | 게이트 `verify_spec()` 실행 |
+| `questions.ready` | openspec / spec-kit | 둘 다 끝나면 spawn `decide` |
+| `decisions.ready` | decide | spawn `spec-rereview` — **멈추지 않는다** |
+| `spec.updated` | spec-rereview | spawn `crosscheck` |
+| `crosscheck.ready` | crosscheck | spawn `ready-audit` |
+| `ready.audit.ready` | ready-audit | 게이트 권한·과금 **독립 재스캔** |
+| `human.gate.raised` | **gate** | `wait_human` → interrupt (런당 한 번) |
+| `human.decided` | human | 게이트 `verify_spec()` 실행 |
 | `spec.verify.passed` | **gate** | spawn `implement` 허용 |
 | `spec.verify.failed` | **gate** | 재계획 / 재질문 루프 |
 | `impl.ready` | implement | spawn `qa` (새 spawn_id) |
@@ -559,7 +582,8 @@ Base: `/api/v1`
 | `POST` | `/threads` | `{feature_id, sources: {name: markdown}, target_repo_path?}` → `thread_id` |
 | `GET` | `/threads/{tid}` | 현재 state 요약 (status, todos, stage, verify_passed) |
 | `GET` | `/threads/{tid}/files/{name}` | State `files` 내용 |
-| `POST` | `/threads/{tid}/answers` | `{answers_markdown}` → **`Command(resume=…)`** |
+| `GET` | `/threads/{tid}/human-gate` | 대기 중인 권한·과금 질문 목록 (없으면 빈 배열) |
+| `POST` | `/threads/{tid}/human-gate` | `{answers: [{item_id, choice, note?}]}` → **`Command(resume=…)`** |
 | `POST` | `/threads/{tid}/events` | 외부/테스트용 이벤트 주입 |
 | `GET` | `/threads/{tid}/history` | checkpoint 목록 (디버그) |
 | `GET` | `/threads/{tid}/report` | `report.md` |
@@ -568,11 +592,15 @@ Base: `/api/v1`
 
 인증 MVP: `Authorization: Bearer <ORCH_API_TOKEN>` 단일 토큰.
 
-**`POST /answers`의 책임**
+**`POST /human-gate`의 책임**
 
-1. `gates.check_answers_human(payload, actor)` — 실패 시 400
-2. `files["answers.md"]` 갱신
-3. `graph.ainvoke(Command(resume=...), config={"configurable": {"thread_id": tid}})`
+1. `gates.check_answers_human(payload, actor)` — subagent가 쓰면 400
+2. **모든 대기 항목이 답변되었는지** 확인 — 부분 답변은 거부
+3. `files["decisions.md"]`에 `[답변]` 태그로 추가
+4. `graph.ainvoke(Command(resume=...), config={"configurable": {"thread_id": tid}})`
+
+**타임아웃 없음.** 답이 올 때까지 thread는 `waiting_human`으로 남는다.
+프로세스는 죽어도 된다 — 상태는 체크포인트에 있다.
 
 ---
 
@@ -638,11 +666,14 @@ def main_agent_node(state) -> dict:
 1. 너는 스펙/코드를 쓰지 않는다. **spawn만** 한다.
 2. `model`은 매 spawn 필수. **고정표는 없다.** `list_models()`만 본다.
 3. `verify_passed=false`거나 `ready_open_count>0`이면 `implement`/`qa`를 고르지 마라 — 골라도 코드가 거부한다.
-4. `triage.ready` 이후에는 `wait_human`이 정상이다.
-5. QA는 implement와 **다른 spawn_id**여야 한다.
-6. 단계 2(구멍 찾기)는 **openspec·spec-kit 둘 다** 돌린다. 둘 다 끝나야 다음이다.
-7. **구현은 병렬로 쪼개지 않는다.** implement는 한 번에 하나.
-8. 실패 시 같은 스킬·다른 모델 또는 다른 스킬로 재계획하고 **이유를 남겨라**.
+4. **빈칸은 네가 채운다.** 사람에게 물어보려고 멈추지 마라.
+   단 `[AI 결정]`에는 **근거·대안·확신도**를 반드시 남겨라 — 없으면 코드가 거부한다.
+5. **권한·보안 / 돈·과금 결정은 네가 정하지 않는다.** 게이트가 멈춘다.
+   네가 「일반」으로 분류해도 게이트가 독립적으로 다시 본다. 우회를 시도하지 마라.
+6. QA는 implement와 **다른 spawn_id**여야 한다.
+7. 단계 2(구멍 찾기)는 **openspec·spec-kit 둘 다** 돌린다. 둘 다 끝나야 다음이다.
+8. **구현은 병렬로 쪼개지 않는다.** implement는 한 번에 하나.
+9. 실패 시 같은 스킬·다른 모델 또는 다른 스킬로 재계획하고 **이유를 남겨라**.
 
 ---
 
@@ -734,7 +765,7 @@ Main이 **한 턴에 두 개의 tool call**을 내면 `ToolNode`가 병렬 실�
 
 ---
 
-## 10. 스킬 9종 계약
+## 10. 스킬 10종 계약
 
 각 스킬 디렉터리의 `SKILL.md`가 진실. 여기 요약.
 
@@ -743,9 +774,10 @@ Main이 **한 턴에 두 개의 tool call**을 내면 `ToolNode`가 병렬 실�
 | `spec-write` | `sources/*`, 보일러플레이트 | `spec.md` (draft) | `spec.draft.ready` | TBD를 추정으로 채움 |
 | `openspec` | `spec.md`, REVIEW-PROMPT | `questions.openspec.md` | `questions.ready` | `답:` 채우기 |
 | `spec-kit` | `spec.md`, REVIEW-PROMPT | `questions.speckit.md` | `questions.ready` | `답:` 채우기 |
-| `answer-triage` | questions 둘 | `questions.md` (병합·4갈래) | `triage.ready` | 사람 몫을 대신 답함 |
-| `spec-rereview` | `spec.md`, `answers.md` | 갱신 `spec.md` | `spec.updated` | 답 무시하고 추정 보강 |
-| `ready-audit` | `spec.md`, `answers.md`, `sources/*` | `ready.md` | `ready.audit.ready` | 기본값 골라놓고 넘어감 |
+| **`decide`** | questions 둘 | `decisions.md` — **전부 답함** | `decisions.ready` | 근거 없이 단정 · 권한/과금 자체 확정 |
+| `spec-rereview` | `spec.md`, `decisions.md` | 갱신 `spec.md` | `spec.updated` | 결정 무시하고 추정 보강 |
+| **`crosscheck`** | 갱신된 `spec.md` | 절 간 충돌 후보 | `crosscheck.ready` | 모순 아닌 것을 올림 (노이즈) |
+| `ready-audit` | `spec.md`, `decisions.md`, `sources/*` | `ready.md` + **권한·과금 분류** | `ready.audit.ready` | 기본값 골라놓고 넘어감 |
 | `implement` | **verified** `spec.md` + hash + repo | 브랜치/patch | `impl.ready` | 스펙 밖 기능, 스택 교체, **테스트 파일 수정** |
 | `qa` | verified AC + impl 산출물 | `qa-report.md` + Playwright | `qa.passed`/`failed` | implement 세션 이어받기 |
 | `e2e-triage` | 실패 테스트 + 트레이스·로그 경로 + spec | `FailureAnalysis` | `triage.diagnosed` | 코드·테스트 **수정** (진단만 한다) |
@@ -754,12 +786,12 @@ Main이 **한 턴에 두 개의 tool call**을 내면 `ToolNode`가 병렬 실�
 
 생성하는 모든 규칙 줄에 출처 등급을 단다.
 
-| 표시 | 뜻 |
-|------|-----|
-| `[코드]` | 현재 코드에서 확인한 사실 |
-| `[답변]` | 사람이 직접 정한 것 |
-| `[스펙 결정]` | 이 문서가 처음 정한 것 |
-| 무표시 | 출처 링크 원문에 근거 있음 |
+| 표시 | 뜻 | 필수 부가정보 |
+|------|-----|-------------|
+| `[코드]` | 현재 코드에서 확인한 사실 | `파일:줄` |
+| **`[AI 결정]`** | **AI가 빈칸을 메운 것** | **근거 · 대안 · 확신도** |
+| `[답변]` | 사람이 직접 정한 것 (권한·과금만) | `decisions.md` 링크 |
+| 무표시 | 출처 링크 원문에 근거 있음 | 줄 링크 |
 
 **세부태스크는 다섯 절로 쓴다:** `처리 · 성공 · 실패 · 예외 · 출처`
 `실패`는 성공의 반대말이 아니라 **하지 말아야 할 것**을 적는다.
@@ -860,22 +892,107 @@ npx playwright install --with-deps   (qa용)
 > `시니어 검수` 같은 프레이밍을 쓰면 도구가 사람 시니어를 상상해
 > "누가 사인하나 / 언제 배포하나"를 쏟아낸다. **쓰지 않는다.**
 
-### 10.3 `answer-triage` — 4갈래
+### 10.3 `decide` — 빈칸을 채운다 (v0.5, 구 `answer-triage`)
 
-| 갈래 | 처리 |
-|------|------|
-| 코드를 보면 사실이 나온다 | 열어 확인하고 `파일:줄` |
-| 이미 정한 것에서 유도된다 | 유도 경로를 인용으로 |
-| 기술 판단 | 추천안 + 이유 한 줄 |
-| **사업·조직 지식 필요** | **사람에게 묻는다** |
+구멍찾기가 올린 질문에 **전부 답한다. 사람에게 넘기지 않는다.**
+다만 **권한·과금은 스스로 확정하지 않고 표시만** 한다 (§11.2).
 
-경계가 애매하면 **마지막으로 보낸다.** 사업 판단을 대신 정하지 않는다.
+| 갈래 | 처리 | 표기 |
+|------|------|------|
+| 코드를 보면 사실이 나온다 | 열어 확인하고 `파일:줄` | `[코드]` |
+| 이미 정한 것에서 유도된다 | 유도 경로를 인용으로 | 무표시 |
+| 기술 판단 | 결정 + 근거·대안·확신도 | `[AI 결정]` |
+| **권한·보안 / 돈·과금** | **결정하지 않는다.** 선택지·추천만 내고 `category`를 단다 | `[정지 후보]` |
 
-> 실측: 51문 중 44문이 앞의 셋으로 풀렸고, 사람 답이 꼭 필요한 것은 **4개**였다.
+> 실측: 51문 중 **44문**이 앞의 셋으로 풀렸다. 사람이 꼭 필요했던 건 **4문**이다.
+> 그 4문 때문에 전체를 멈추지 않는 것이 v0.5의 요지다.
 
-### 10.4 `ready-audit` — 권한 검수
+#### 10.3.1 출력 — `decisions.md`가 정본
 
-`[스펙 결정]` **전건**을 넷으로 분류한다.
+```markdown
+## D-012  신규 고객의 정의
+- **결정:** 이번 달 첫 구매한 고객           [AI 결정]
+- **근거:** 3쪽 「구매 이력 기준」에서 유도 (sources/spec.md#L88)
+- **대안:** 가입 기준 — 채택 안 함 (7쪽 집계와 불일치)
+- **확신도:** 중
+- **분류:** 일반
+
+## D-013  지점 관리자의 조회 범위
+- **결정:** 없음 — **사람 판단 필요**              [정지 후보]
+- **왜:** 4쪽 「자기 지점만」과 6쪽 「전체 랭킹 노출」이 충돌
+- **선택지:** ① 랭킹에서 지점명 마스킹 (추천) ② 랭킹 비노출 ③ 전체 공개
+- **분류:** **권한**
+```
+
+스펙 본문에는 표기와 `D-nnn` 링크만 달고, **원문은 여기 남는다.**
+
+#### 10.3.2 프롬프트 강제 조항
+
+```text
+빈칸은 네가 채운다. 사람에게 물어보려고 멈추지 마라.
+
+단 세 가지는 반드시 지켜라.
+1. 결정마다 근거·대안·확신도를 남겨라. 없으면 코드가 거부한다.
+2. 근거는 인용이다. "합리적이므로"는 근거가 아니다.
+3. 권한·보안·금액·정산에 영향을 주면 결정하지 말고 [정지 후보]로 올려라.
+   네가 「일반」이라고 적어도 게이트가 독립적으로 다시 본다.
+   우회를 시도하면 오탐으로 잡혀 더 느려진다.
+
+확신이 낮아도 결정은 해라. 확신도: 하 로 적고 대안을 남기면 된다.
+결정을 미루는 것이 가장 나쁜 선택이다 — 단, 위 3번은 예외다.
+```
+
+### 10.3b `crosscheck` — 절끼리 충돌 (v0.5 신규, Q2 결정)
+
+**결정이 반영된 뒤**에 돈다. 답이 들어오면서 **새로 생긴 충돌**을 잡는 자리다.
+
+| 단계 | 보는 것 |
+|------|---------|
+| 2 구멍 찾기 | **비어 있는 칸** |
+| **5 crosscheck** | **채워진 것끼리 안 맞는 것** |
+| 6 ready-audit | 채워졌는데 **근거 없는 것** |
+
+셋 다 겨누는 방향이 다르다.
+
+#### 10.3b.1 판별 기준 — 노이즈를 막는 한 줄
+
+```text
+올리기 전에 자문하라.
+  "두 절을 동시에 만족하는 구현이 존재하는가?"
+
+존재하면 모순이 아니다. 올리지 마라.
+존재하지 않는 경우만, 왜 불가능한지 한 줄로 보여라.
+```
+
+| 모순 **아님** | 모순 **맞음** |
+|---|---|
+| 합계도 보여주고 분해도 보여준다 | 합계가 **무엇을 포함하는지** 두 절이 다르게 말한다 |
+| 한 화면에 여러 관점을 둔다 | **같은 단어를 두 절이 다르게 정의한다** |
+| 절마다 다른 것을 다룬다 | **A절 규칙이 B절 기능에서 뚫린다** |
+
+> 합계 위에 두고 아래에 분해를 두는 것은 대시보드 기본이지 모순이 아니다.
+> 이런 걸 올리기 시작하면 검수 문서가 쓰레기로 차고 아무도 안 읽는다.
+
+**진짜 모순 3종**
+
+1. **같은 단어, 다른 정의** — 2쪽 "신규 고객 = 첫 구매" vs 7쪽 "= 가입". 두 화면 숫자가 안 맞는다
+2. **권한 누수** — 4쪽 "자기 지점만" vs 6쪽 "전체 랭킹 노출". 규칙이 기능에서 뚫린다
+3. **기준 시점 충돌** — 3쪽 "결제일 집계" vs 8쪽 "주문일 차감". 월말 건이 이중 계산된다
+
+#### 10.3b.2 산출물과 게이트 연결
+
+- 찾은 후보는 `decisions.md`에 `[CROSS]` 태그로 올린다
+- **일반이면 `decide`가 답하고, 권한·과금이면 `[정지 후보]`가 된다**
+- `meta/crosscheck.json` — `{spawn_id, model, at, found: N}` **실행 증거**
+- verify 3항(절 간 모순 0)은 **"스캔을 돌렸다 + `[CROSS]`가 전부 닫혔다"** 로 환원된다
+
+> 이렇게 하면 3항이 **코드로 검사 가능**해진다.
+> "사람이 봤다는 파일이 있으면 통과"는 게이트가 아니라 형식이었다.
+
+### 10.4 `ready-audit` — 권한 검수 + 정지 분류
+
+`[AI 결정]` **전건**을 넷으로 분류한다. v0.5에서는 이제 결정의 **대부분이** `[AI 결정]`이라
+이 스킬의 부담이 커졌다. 그만큼 중요해졌다.
 
 | 분류 | 처리 |
 |------|------|
@@ -977,7 +1094,9 @@ spec_gap을 impl_bug로 부르면 AI가 빈칸을 추정으로 메우게 된다.
 | Gate ID | 언제 | 실패 시 |
 |---------|------|---------|
 | `G_MODEL_KNOWN` | 모든 spawn | GateReject → ToolMessage |
-| `G_ANSWERS_HUMAN` | `POST /answers` | HTTP 400 |
+| `G_DECISION_LOGGED` | decide / rereview 산출물 | 근거·대안·확신도 없는 `[AI 결정]` 거부 |
+| `G_HUMAN_GATE` | verify 직전 | 권한·과금 미답이면 interrupt (§11.2) |
+| `G_ANSWERS_HUMAN` | `POST /human-gate` | 사람 외 주체면 HTTP 400 |
 | `G_OPENSPEC_VALID` | openspec 스킬 종료 후 | `openspec validate --strict` 실패 시 재spawn |
 | `G_VERIFY` | ready-audit 후 | `spec.verify.failed` |
 | `G_READY` | spawn implement | `ready_open_count > 0`이면 reject |
@@ -996,14 +1115,94 @@ Main이 거부 사유를 읽고 **스스로 재계획**한다. fail-closed와 �
 
 **원칙 3:** `gates.py`는 **LangGraph를 import하지 않는다.** 순수 함수다.
 
+**원칙 4 (v0.5 신규):** **AI는 자기에게 걸린 정지를 풀 수 없다.**
+AI가 내린 분류를 게이트가 신뢰하지 않고 **독립적으로 다시 판정**한다 (§11.2).
+
 ### 11.1 Verify 6항
 
 1. 인수조건마다 판별/계산/출처
 2. 조건문·`또는`에 분기 조건
-3. 절 간 모순 0
-4. 추정 답 0
+3. **절 간 모순 0** — `crosscheck` 실행 증거 + `[CROSS]` 전건 닫힘 (§10.3b.2)
+4. **근거 없는 결정 0** — 모든 `[AI 결정]`에 근거·대안·확신도
 5. 잔여 차단 질문 0
 6. 승인 토큰 + **spec hash**
+
+### 11.2 권한·과금 정지 — 이중 검사 (v0.5 신규)
+
+#### 11.2.1 왜 이 둘만인가
+
+| 종류 | 틀리면 |
+|------|--------|
+| **권한 · 보안** | 데이터가 **이미 샌 뒤**다 |
+| **돈 · 과금** | 정산이 **이미 나간 뒤**다 |
+
+나머지(화면·용어·집계 방식)는 틀려도 코드를 고치면 된다. 이 둘은 **되돌릴 수 없다.**
+그래서 오직 이 둘만 사람이 정한다.
+
+#### 11.2.2 AI 분류를 신뢰하지 않는다
+
+AI가 "이건 권한 아닙니다" 하고 넘어가면 정지가 무력화된다.
+**자기가 멈출지 말지를 자기가 정하는 구조는 게이트가 아니다.**
+
+```python
+def human_gate_items(state) -> list[dict]:
+    ai_flagged   = [d for d in state["sdd"]["decisions"]
+                    if d["category"] in {"권한", "과금"}]
+    gate_flagged = scan_sensitive(state["files"]["spec.md"],
+                                  state["files"]["decisions.md"])
+    return dedupe(ai_flagged + gate_flagged)      # ★ 합집합
+```
+
+**합집합이다. 교집합이 아니다.** 둘 중 하나만 걸어도 멈춘다.
+**오탐으로 불필요하게 멈추는 것은 감수한다** — 반대 방향 실수가 훨씬 비싸다.
+
+`scan_sensitive()`가 보는 것:
+
+| 축 | 신호 |
+|----|------|
+| **위치** | 보일러플레이트 **§6 권한·보안** 절에 속한 결정 |
+| **권한 어휘** | 역할 · 조회 범위 · 노출 대상 · 마스킹 · `isAdmin` 류 코드 심볼 |
+| **금액 어휘** | 금액 · 정산 · 차감 · 할인 · 수수료 · 환불 · 과금 주기 |
+
+어휘 목록은 `config/sensitive_terms.json`으로 빼고 **프로젝트마다 늘릴 수 있게** 한다.
+
+#### 11.2.3 언제 멈추나 — 한 번, 가장 늦게
+
+```
+… → crosscheck → ready-audit → [게이트 재스캔]
+                                   ├ 해당 없음 → verify
+                                   └ 있음 → interrupt()  ← 여기 한 번뿐
+```
+
+- **런당 한 번.** 5번 따로 멈추면 못 쓴다
+- **가장 늦은 지점**에 둔다 — 그래야 모든 후보가 모인다
+- `ready-audit` 뒤인 이유: ready가 결정 전건을 이미 분류해 놓았다
+
+#### 11.2.4 사람이 보는 것
+
+```
+이 기능에서 사람 판단이 필요한 것 2건입니다.
+
+[1] 권한 — 지점 관리자의 조회 범위          (D-013)
+    4쪽 "자기 지점만" vs 6쪽 "전체 랭킹 노출"
+    ① 랭킹에서 지점명 마스킹   (추천)
+    ② 지점 관리자는 랭킹 비노출
+    ③ 전체 공개
+    → 답 없으면 진행하지 않습니다
+
+[2] 과금 — 취소 건 차감 시점                (D-027)
+    3쪽 결제일 기준 vs 8쪽 주문일 기준 — 월말 건이 이중 계산됩니다
+    ① 둘 다 결제일로 통일     (추천)
+    ② 둘 다 주문일로 통일
+```
+
+**부분 답변은 거부한다.** 전부 답해야 재개된다.
+
+#### 11.2.5 타임아웃 없음
+
+"며칠 지났으니 추천안으로 진행"을 넣으면 **정지의 의미가 사라진다.**
+되돌릴 수 없어서 멈춘 것이므로, 답이 올 때까지 `waiting_human`으로 남는다.
+프로세스는 죽어도 된다 — 상태는 체크포인트에 있다.
 
 MVP에서 1~5는 휴리스틱 스크립트 + 체크리스트로 시작 가능.
 **6번(토큰+hash)과 answers 공란 검사, ready 1절 검사는 반드시 코드.**
@@ -1126,7 +1325,9 @@ def main_agent_node(state, *, store: BaseStore):
 1. `POST /threads` → (사람 답 1회) → report까지 진행 가능
 2. `verify_passed=false`일 때 implement spawn이 **GateReject ToolMessage**로 거부되고, Main이 재계획한다
 3. `ready_open_count > 0`이면 implement spawn 거부
-4. questions의 `답:`을 subagent가 채우면 `G_ANSWERS_HUMAN` 실패
+4. **근거·대안·확신도 없는 `[AI 결정]`이 거부**된다
+4b. **권한·과금 결정이 미답이면 verify가 통과하지 않는다**
+4c. **AI가 권한 결정을 「일반」으로 분류해도 게이트가 독립적으로 잡는다**
 5. `spawn_history`에 모든 spawn의 **skill + model + brief + 비용** 기록
 6. **subagent messages가 부모 `messages`에 나타나지 않는다** (테스트로 검증)
 7. `deepagents` import **없음** (CI grep)
@@ -1135,7 +1336,7 @@ def main_agent_node(state, *, store: BaseStore):
 10. `gates.py`에 `langgraph` import **없음** (CI grep)
 11. 프로세스 kill 후 같은 `thread_id`로 재개 (Phase 3)
 12. **서브에이전트가 Store에 쓰지 못한다** — `remember` 툴은 Main에만 있다
-13. **`answers.md` 내용이 Store에 저장되지 않는다** (테스트)
+13. **권한·과금 사람 답이 Store에 저장되지 않는다.** 단 `[AI 결정]`은 저장된다 (테스트)
 14. `evidence` / `source_run_id` 없는 Store 레코드는 **저장 거부**
 15. 서브에이전트 셸 호출이 **allowlist 밖이면 거부** (임의 셸 실행 불가)
 16. **`qa.failed` 직후 `implement` spawn이 거부**된다 — `e2e-triage`를 거쳐야 한다
@@ -1165,7 +1366,7 @@ def main_agent_node(state, *, store: BaseStore):
 | **S2** | `spawn` 툴 — 격리 서브그래프 + 요약 반환 | **부모 messages에 ToolMessage 1개만** (테스트) |
 | **S3** | `gates.py` (순수) + GateReject ToolMessage | 거부 → Main 재계획 green |
 | **S4** | `sdd_cli.py` (allowlist) + `spec-write` / `openspec` / `spec-kit` 병렬 spawn + `G_OPENSPEC_VALID` | `questions.md` 생성 · validate green |
-| **S5** | `answer-triage` + `wait_human` → `interrupt()` + `/answers` resume | 사람 답 1회 왕복 |
+| **S5** | `decide` + `G_DECISION_LOGGED` + `crosscheck` | **멈추지 않고** 빈칸이 채워지고, 근거 없는 결정은 거부된다 |
 | **S6** | `spec-rereview` + `ready-audit` + verify 6항 + `G_READY` | `verify_passed=true` |
 | **S7** | `implement` (실제 디스크) + `qa` + Playwright + report | E2E 1건 |
 | **S8** | **`e2e-triage` + 4종 라우팅 + 루프 가드 5종** | 일부러 `spec_gap`을 심고 **재질문으로 나가는지** 확인 |
@@ -1191,19 +1392,23 @@ SDD 게이트 전체가 E2E 루프로 우회된다. 일부러 구멍 있는 스�
 | **Q1** | Main 모델은 env 고정인가? | **env `MAIN_MODEL` 고정.** 서브 모델은 매 spawn Main이 선택 — §0.2 「고정표 없음」과 모순되지 않는다 | 2026-09-23 |
 | **Q4** | openspec / spec-kit을 CLI로 호출? | **CLI 호출.** 단 CLI는 LLM을 부르지 않는다 — scaffold·instructions·**validate**는 CLI, 구멍찾기는 서브에이전트 LLM (§10.2) | 2026-09-23 |
 | **Q6** | 장기기억(Store)·벡터DB를 범위에 넣나? | **넣는다.** `PostgresStore` + pgvector (§5.4, §12.3~4). Checkpoint와 분리 | 2026-09-23 |
+| **Q2** | 「절 간 모순 0」을 어떻게 판정? | **`crosscheck` 스킬이 후보만 뽑고, `decide`/사람이 닫고, 게이트는 「전건 닫혔나」만 센다.** 수동 체크 파일은 게이트가 아니라 형식이라 폐기 (§10.3b) | 2026-09-27 |
+| **Q9** | `max_iterations` 기본값 | **3.** run 단위. 실제로는 루프 가드 2(같은 진단 2연속)가 먼저 걸려 2회차에서 멈추는 경우가 많다 | 2026-09-27 |
+| **Q11** | `respec` 후 `iteration` 리셋? | **리셋하지 않는다.** 스펙 수정 후 남은 예산을 알아야 한다 | 2026-09-27 |
+| **Q12** | 사람 사전 답변을 유지하나? | **제거.** 빈칸은 AI가 결정하고 근거를 남긴다. **권한·보안 / 돈·과금만 정지**하며 AI가 그 정지를 풀 수 없다 (§11.2) | 2026-09-27 |
 
 ### 15.2 열린 것
 
 | ID | 질문 | 기본 제안 (비구속) |
 |----|------|-------------------|
-| Q2 | `절 간 모순 0`(verify 3항)을 MVP에서 어떻게 판정? | `meta/human-crosscheck.ok` 수동 체크 파일. 없으면 failed |
+
 | Q3 | `thread_id`와 `run_id`를 분리 유지? | MVP는 동일값. 재질문 루프가 새 thread를 쓰게 되면 분리 |
 | Q5 | `files` 256KB 초과 시 자동 디스크 강등? | S2에서 경고만, S8에서 자동화 |
 | Q7 | `org_id` / `user_id`를 어디서 받나? (Store 네임스페이스 키) | MVP는 env 단일 org. 멀티테넌시는 이후 |
 | Q8 | `confirmed` 승격의 유사도 임계값 | 0.85 cosine에서 시작해 실측으로 조정 |
-| Q9 | `max_iterations` 기본값 | **3.** 회차당 implement(비싼 모델)+qa+triage라 실비용이 크다 |
 | Q10 | `flaky` 테스트를 실패로 셀 것인가 | 1회 재실행 후에도 불안정하면 `test_defect`로 분류 |
-| Q11 | `respec`으로 나간 뒤 `iteration`을 리셋? | **리셋하지 않는다.** 스펙 수정 후 남은 예산을 알아야 한다 |
+| Q13 | `config/sensitive_terms.json`의 초기 어휘 목록 | 권한·금액 기본 세트로 시작해 오탐/미탐 실측으로 조정 |
+| Q14 | 확신도 `하`인 `[AI 결정]`을 보고서에서 어떻게 부각하나 | 토탈 보고 상단에 별도 절 |
 
 ---
 
@@ -1222,4 +1427,5 @@ SDD 게이트 전체가 E2E 루프로 우회된다. 일부러 구멍 있는 스�
 | 0.1 | 2026-09-22 | 초안. 자체 tick · 파일 상태 · No LangGraph |
 | 0.2 | 2026-09-23 | **LangGraph 채택.** 네 기둥 구조, spawn=툴 격리, 하이브리드 FS, checkpointer/interrupt, SDD 0~9 (ready 권한검수·표기 4종 흡수), 스킬 8종, 압축, Playwright, cloudflared |
 | 0.3 | 2026-09-23 | **Store(장기기억) + pgvector 채택** (§5.4·§12.3~4), **Q4 CLI 호출 결정** (§10.2 — CLI는 LLM을 부르지 않음), `G_OPENSPEC_VALID` 신설, 셸 allowlist, OpenAI 모델·임베딩 고정, Q1 확정 |
+| 0.5 | 2026-09-27 | **사람 사전 답변 제거.** 빈칸은 AI가 결정 + 근거·대안·확신도(`[AI 결정]`), **권한·보안/돈·과금만 정지**하고 게이트가 **독립 재스캔**(§11.2). `answer-triage`→`decide`, `crosscheck` 신설(Q2 확정) → 스킬 10종. `answers.md`→`decisions.md`. `G_DECISION_LOGGED`·`G_HUMAN_GATE` 신설 |
 | 0.4 | 2026-09-23 | **E2E 실패 정책.** 구현·검증 루프 상태를 State로 편입(§5.5), **실패 원인 4종 → 경로 4종**(`spec_gap`은 루프 이탈), `e2e-triage` 스킬 신설(9번째), 루프 가드 5종, `G_TEST_INTEGRITY`·`G_LOOP`·`G_TRIAGE_FIRST` |
