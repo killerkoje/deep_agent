@@ -236,3 +236,58 @@ def test_spawn_is_recorded_with_skill_model_and_cost():
     assert entry["event"] == "spec.draft.ready"
     assert {"tokens_in", "tokens_out", "cost_usd"} <= set(entry)
     assert entry["spawn_id"].startswith("sp_")
+
+
+# --- what a real model actually returns ------------------------------
+
+
+def test_summary_handles_block_content():
+    """Reasoning models return `content` as a list of typed blocks, not
+    a string. The scripted models in these tests always return strings,
+    so this shape only appeared on the first live run - and crashed the
+    whole pipeline with 'list object has no attribute strip'.
+    """
+    from langchain_core.messages import AIMessage
+
+    from deep_agent.llm import text_of
+
+    blocks = AIMessage(
+        content=[
+            {"type": "reasoning", "reasoning": "let me think about this"},
+            {"type": "text", "text": "spec.md written: 12 ACs"},
+        ]
+    )
+    # the conclusion comes back; the thinking does not
+    assert text_of(blocks) == "spec.md written: 12 ACs"
+
+    assert text_of(AIMessage(content="plain string")) == "plain string"
+    assert text_of(AIMessage(content=[])) == ""
+    assert text_of(AIMessage(content="")) == ""
+
+
+def test_spawn_survives_a_block_content_summary():
+    """End to end: a sub-agent whose final message is block-shaped must
+    still produce one clean ToolMessage for Main."""
+    from langchain_core.messages import AIMessage
+
+    class BlockModel(ScriptedChatModel):
+        def _generate(self, messages, stop=None, run_manager=None, **kw):
+            from langchain_core.outputs import ChatGeneration, ChatResult
+
+            msg = AIMessage(
+                content=[
+                    {"type": "reasoning", "reasoning": "internal"},
+                    {"type": "text", "text": SUB_FINAL},
+                ]
+            )
+            return ChatResult(generations=[ChatGeneration(message=msg)])
+
+    out, _ = run_main(
+        [spawn_call()],
+        sub=lambda _m=None: BlockModel([], final_text=SUB_FINAL),
+        sources={"prd.md": "# PRD"},
+    )
+    tool_msgs = [m for m in out["messages"] if isinstance(m, ToolMessage)]
+    assert len(tool_msgs) == 1
+    assert SUB_FINAL in tool_msgs[0].content
+    assert "internal" not in tool_msgs[0].content

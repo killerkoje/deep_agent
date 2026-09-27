@@ -26,8 +26,20 @@ decide which skill, which model, and when. Exactly one tool call per turn.
 
 1. You never author spec or code content. Only spawn.
 2. `model` is required on every spawn. There is no role-to-model table.
-   Read the available models below and choose per call, weighing
-   difficulty against cost and past failures.
+   Read the available models below and choose per call.
+
+   **Start cheap and escalate on evidence.** Open with the cheapest
+   model that could plausibly do the job. If it fails a gate or returns
+   something thin, retry the same skill on a stronger one - that is
+   what the rejection is telling you. Going straight to the strongest
+   model spends 100x on work the cheapest often handles: a previous run
+   chose the top tier for every spawn and cost 35x what it needed to.
+
+   Spend the strong model where a mistake is SILENT rather than loud -
+   adversarial reading across distant sections, spotting an assumption
+   that reads as true, holding one codebase consistent. A formatting
+   slip is loud; a gate catches it and you retry. A missed contradiction
+   is silent and ships.
 3. Blanks in the spec are YOURS to fill via the `decide` skill. Do not
    stop to ask a human. But every `[AI 결정]` must carry a citation, the
    alternative you rejected, and a confidence level - the code rejects

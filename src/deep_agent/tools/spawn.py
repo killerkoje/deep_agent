@@ -178,7 +178,10 @@ def spawn(
     # the gates read. Re-parsed after any skill that touches it, so the
     # two cannot drift apart.
     if "decisions.md" in produced:
-        sdd["decisions"] = gates.parse_decisions_md(produced["decisions.md"])
+        # None means "unreadable", which must not become an empty list -
+        # an empty list reads as "no decisions to check" and clears the
+        # human gate. Kept as None so the gates refuse instead.
+        sdd["decisions"] = gates.parse_decisions(produced["decisions.md"])
 
     # Same idea for ready.md: G_READY needs a number, not prose. Left
     # as None when the audit has not run or its output is unparseable -
@@ -240,7 +243,25 @@ def _check_outputs(
         return gates.check_openspec_valid(res.exit_code, res.json())
 
     if skill in {"decide", "spec-rereview", "crosscheck"}:
-        return gates.check_decisions_logged(sdd.get("decisions") or [])
+        decisions = sdd.get("decisions")
+        if decisions is None and "decisions.md" in files:
+            return gates.GateReject(
+                "G_DECISION_FORMAT",
+                "decisions.md carries no readable decision record. Emit a "
+                "```json block: [{id, tag, text, rationale, alternatives, "
+                "confidence, category}]",
+                skill,
+            )
+        return gates.check_decisions_logged(decisions or [])
+
+    if skill == "ready-audit":
+        if sdd.get("ready_open_count") is None:
+            return gates.GateReject(
+                "G_READY_FORMAT",
+                "ready.md does not declare ready_open_count. Put it in "
+                "frontmatter: ---\nready_open_count: N\n---",
+                skill,
+            )
 
     return None
 

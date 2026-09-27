@@ -26,7 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from .llm import get_chat_model, usage_from_message
+from .llm import get_chat_model, text_of, usage_from_message
 
 # How many agent<->tools turns a sub-agent gets before we stop it.
 MAX_SUBAGENT_TURNS = 24
@@ -117,7 +117,7 @@ def run_subagent(
 
     last = result["messages"][-1]
     return {
-        "summary": (last.content or "").strip() or "(no summary returned)",
+        "summary": text_of(last) or "(no summary returned)",
         "files": result.get("files", {}),
         "turns": result.get("turns", 0),
         "tokens_in": result.get("tokens_in", 0),

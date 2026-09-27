@@ -216,8 +216,51 @@ _FIELD_KEYS = {
 }
 
 
+_JSON_BLOCK = re.compile(r"```(?:json)?\s*\r?\n(\[.*?\]|\{.*?\})\r?\n```", re.S)
+
+
+def parse_decisions(md: str | None) -> list[dict[str, Any]] | None:
+    """decisions.md -> the list the gates operate on, or None if the
+    document does not carry one in a form we can read.
+
+    None is the important return value. On the first live run the model
+    did its job - it marked fifteen items as [정지 후보] - but wrote
+    them as prose bullets instead of the heading shape the parser
+    expected. The parser returned [], the human gate saw nothing to
+    stop on, and a run full of unresolved permission questions sailed
+    through. Returning None makes that state refuse instead of pass.
+    """
+    if not md or not md.strip():
+        return None
+
+    # 1. A declared JSON block is the contract. Skills are told to emit
+    #    one precisely so a gate never has to read prose.
+    for block in _JSON_BLOCK.findall(md):
+        try:
+            data = json.loads(block)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        items = data.get("decisions") if isinstance(data, dict) else data
+        if isinstance(items, list) and items and all(isinstance(d, dict) for d in items):
+            return [_normalize_decision(d) for d in items]
+
+    # 2. Fall back to the markdown shape.
+    parsed = parse_decisions_md(md)
+    return parsed or None
+
+
+def _normalize_decision(d: dict[str, Any]) -> dict[str, Any]:
+    out = dict(d)
+    out.setdefault("category", "일반")
+    if out.get("category") not in {"일반", "권한", "과금"}:
+        out["category"] = "일반"
+    if out.get("tag") == "[정지 후보]" and out["category"] == "일반":
+        out["category"] = "권한"
+    return out
+
+
 def parse_decisions_md(md: str) -> list[dict[str, Any]]:
-    """decisions.md -> the structured list the gates operate on."""
+    """The markdown shape: `## D-001` headings with `- **key:**` fields."""
     if not md:
         return []
 
@@ -259,40 +302,64 @@ def parse_decisions_md(md: str) -> list[dict[str, Any]]:
 # G_READY input - counting what is still open in ready.md
 # --------------------------------------------------------------------
 
-# ready.md section 1 is the only part open for discussion. Rows there
-# are "| [R1](#r1) | issue | kind | status |"; an item closed in place
-# keeps its row and flips its status to 닫힘 (docs/SPEC.md 10.4).
-_READY_SECTION_1 = re.compile(
-    r"^##\s*1\.[^\n]*\n(.*?)(?=^##\s|\Z)", re.M | re.S
+# A gate reads a declared machine-readable value, never prose.
+#
+# The first live run is why. count_ready_open used to fall back to
+# searching the section body for "없음", and matched it inside the
+# sentence "매출 0/없음/음수 지점" - reporting a clean audit for a
+# document whose own header said 24 items were open. A heuristic that
+# can silently produce a PASSING value is worse than no gate at all.
+#
+# So: skills declare the number in frontmatter, and anything we cannot
+# read stays None. None means "refuse", not "fine".
+
+_FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---\s*?\r?\n", re.S)
+_YAML_INT = re.compile(r"^\s*([A-Za-z_][\w-]*)\s*:\s*(-?\d+)\s*$", re.M)
+
+
+def parse_frontmatter_ints(md: str | None) -> dict[str, int]:
+    """Integer keys from a leading `---` block. Deliberately tiny - we
+    only ever read declared counts out of it, not arbitrary YAML."""
+    if not md:
+        return {}
+    block = _FRONTMATTER.match(md)
+    if not block:
+        return {}
+    return {k: int(v) for k, v in _YAML_INT.findall(block.group(1))}
+
+
+# Fallback only: a table whose rows carry an explicit open/closed status.
+_READY_SECTION_1 = re.compile(r"^##\s*1[.\s][^\n]*\n(.*?)(?=^##\s|\Z)", re.M | re.S)
+# `| R1 |`, `| [R1](#r1) |`, `| G01 |` - an id cell, however it is linked.
+_READY_ROW = re.compile(
+    r"^\|\s*\[?[A-Z]{0,2}\d+[A-Za-z]?\]?(?:\(#[^)]*\))?\s*\|(.*)$", re.M
 )
-_READY_ROW = re.compile(r"^\|\s*\[?R\d+\]?[^|]*\|(.*)$", re.M)
-_CLOSED = re.compile(r"닫힘|closed|해결|완료")
+_CLOSED = re.compile(r"닫힘|closed|해결|완료|resolved")
 
 
 def count_ready_open(ready_md: str | None) -> int | None:
-    """How many items ready.md still has open. None if it has not run.
+    """Open items in ready.md, or None if the document does not say.
 
-    None and 0 are different: "the audit never happened" must not read
-    as "the audit found nothing", which is why G_READY rejects both but
-    with different messages.
+    None and 0 are different. "the audit never ran" and "the audit
+    found nothing" must not collapse into the same value, because one
+    of them is a pass.
     """
     if not ready_md:
         return None
 
+    # 1. The declared value wins. This is what skills are told to emit.
+    declared = parse_frontmatter_ints(ready_md).get("ready_open_count")
+    if declared is not None:
+        return max(0, declared)
+
+    # 2. Otherwise count table rows that are not marked closed.
     section = _READY_SECTION_1.search(ready_md)
     if not section:
         return None
-
-    body = section.group(1)
-    rows = _READY_ROW.findall(body)
-    if rows:
-        return sum(1 for rest in rows if not _CLOSED.search(rest))
-
-    # No table. Accept an explicit "0건" / "없음" as a closed audit;
-    # anything else is unparseable and stays unknown rather than passing.
-    if re.search(r"\b0\s*건|없음|none", body, re.I):
-        return 0
-    return None
+    rows = _READY_ROW.findall(section.group(1))
+    if not rows:
+        return None  # unreadable -> refuse, never 0
+    return sum(1 for rest in rows if not _CLOSED.search(rest))
 
 
 # --------------------------------------------------------------------
@@ -346,8 +413,20 @@ def human_gate_items(
 
 
 def check_human_gate(
-    decisions: list[dict[str, Any]], terms: dict[str, list[str]]
+    decisions: list[dict[str, Any]] | None, terms: dict[str, list[str]]
 ) -> GateReject | None:
+    """`decisions=None` means the decision record could not be read.
+
+    That is a refusal, not a pass. An unreadable record is exactly the
+    state in which a permission question hides.
+    """
+    if decisions is None:
+        return GateReject(
+            "G_HUMAN_GATE",
+            "decisions could not be read - cannot confirm no permission/billing "
+            "decision is outstanding",
+        )
+
     pending = [d for d in human_gate_items(decisions, terms) if not (d.get("answer") or "").strip()]
     if pending:
         ids = ", ".join(str(d.get("id")) for d in pending[:5])

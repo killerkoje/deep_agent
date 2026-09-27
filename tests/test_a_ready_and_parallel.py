@@ -37,6 +37,23 @@ READY_CLOSED = READY_OPEN.replace("| 미결 |", "| 닫힘 |").replace(
 
 READY_EMPTY = "# ready\n\n## 1. 남은 문제\n\n**0건.** 전부 닫혔다.\n"
 
+# What a skill is told to emit: the count is declared, not narrated.
+READY_DECLARED = "---\nready: false\nready_open_count: 24\n---\n# ready\n\n산문만 있다\n"
+READY_DECLARED_ZERO = "---\nready_open_count: 0\n---\n# ready\n"
+
+# The exact document shape that slipped through on the first live run:
+# the header says 24 are open, and the body happens to contain 없음
+# inside an unrelated sentence.
+READY_LIVE_TRAP = """\
+# readiness audit
+
+## 1. 논의·승인 대상 (열린 항목 24개)
+
+| ID | 분류 | 내용 |
+|---|---|---|
+| G03 | 과금 | 매출 0/없음/음수 지점의 랭킹 포함 규칙 |
+"""
+
 
 # --- counting --------------------------------------------------------
 
@@ -58,8 +75,21 @@ def test_section_two_rows_are_not_counted():
     assert gates.count_ready_open(READY_OPEN) == 2  # not 3, C1 is in section 2
 
 
-def test_prose_zero_is_accepted():
-    assert gates.count_ready_open(READY_EMPTY) == 0
+def test_declared_count_wins():
+    """Skills declare the number in frontmatter; that is the contract."""
+    assert gates.count_ready_open(READY_DECLARED) == 24
+    assert gates.count_ready_open(READY_DECLARED_ZERO) == 0
+
+
+def test_prose_is_never_read_as_clean():
+    """The live-run bug. count_ready_open used to search the body for
+    '없음' and matched it inside '매출 0/없음/음수 지점' - reporting a
+    clean audit for a document whose own header said 24 were open.
+
+    A heuristic that can silently return a PASSING value is worse than
+    no gate. Prose now yields None, and None refuses."""
+    assert gates.count_ready_open(READY_EMPTY) is None  # was 0
+    assert gates.count_ready_open(READY_LIVE_TRAP) == 1  # the one table row
 
 
 def test_unknown_stays_unknown():

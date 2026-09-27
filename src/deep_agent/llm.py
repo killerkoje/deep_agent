@@ -53,6 +53,34 @@ def usage_from_message(msg: Any) -> tuple[int, int]:
     return int(meta.get("input_tokens", 0)), int(meta.get("output_tokens", 0))
 
 
+def text_of(msg: Any) -> str:
+    """The readable text of a message, whatever shape it arrived in.
+
+    Reasoning models return `content` as a list of typed blocks, not a
+    string - a plain `.strip()` on it raises. Scripted test models
+    always return strings, so this only shows up against a real model.
+
+    Reasoning blocks are dropped: the summary Main reads is the
+    conclusion, not the thinking that produced it.
+    """
+    content = getattr(msg, "content", msg)
+    if isinstance(content, str):
+        return content.strip()
+    if not isinstance(content, list):
+        return str(content or "").strip()
+
+    parts: list[str] = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict):
+            if block.get("type") in {"reasoning", "thinking"}:
+                continue
+            if text := block.get("text"):
+                parts.append(str(text))
+    return "\n".join(parts).strip()
+
+
 def get_chat_model(model: str, reasoning_effort: str | None = None) -> BaseChatModel:
     """Build a chat model by id. Main passes its env-fixed model; spawn
     passes whatever Main chose for that sub-agent."""

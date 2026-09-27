@@ -91,7 +91,12 @@ def route_sub(decisions_md=DECISIONS_OK):
             "no contradictions",
             {"meta/crosscheck.json": '{"found": 0}'},
         ),
-        "ready-audit": writer("ready.md", "## 1. 남은 문제\n\n0건", "section 1 empty"),
+        # Frontmatter, not prose - a gate reads a declared number.
+        "ready-audit": writer(
+            "ready.md",
+            "---\nready_open_count: 0\n---\n# ready\n\n## 1. 남은 문제\n\n없음\n",
+            "section 1 empty",
+        ),
     }
 
     box = {"skill": None}

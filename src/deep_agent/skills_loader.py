@@ -49,6 +49,16 @@ deliberate, so your judgment is independent.
 When you are done, your FINAL message is the summary the orchestrator
 reads. Keep it short and factual: what you produced, and anything that
 blocked you. Do not call the next step yourself; report and stop.
+
+## Output paths are exact
+
+Write your declared output files at EXACTLY the paths given, with
+write_file. Not `specs/<name>.md`, not `<skill>-output.md`, not a name
+you think reads better - the orchestrator looks for the exact path and
+rejects the run otherwise, which costs a full retry.
+
+If an input file you expected is absent, say so in your summary and
+work with what you have. Do not stop to ask; you get no reply.
 """
 
 _REGISTRY: dict[str, Skill] = {
@@ -132,6 +142,25 @@ is rejected by the gate.
 
 Low confidence is fine - write 확신도: 하 and give the alternative.
 Refusing to decide is the worse failure, except for the stop categories.
+
+## decisions.md must carry a machine-readable block
+
+Prose is for people; the gates read this. Put it near the top:
+
+```json
+[
+  {"id": "D-001", "tag": "[AI 결정]", "text": "the decision in one line",
+   "rationale": "a citation - file#Lnn or D-nnn, never 'it seems reasonable'",
+   "alternatives": "what you rejected and why",
+   "confidence": "상|중|하", "category": "일반"},
+  {"id": "D-002", "tag": "[정지 후보]", "text": "...", "category": "권한"}
+]
+```
+
+Every item you answered and every item you left for a person goes in
+this list. One that is missing from it is invisible to the gate - and a
+permission question the gate cannot see is one that ships unanswered.
+Write the human-readable version below it as well.
 """,
         inputs=("spec.md", "questions.openspec.md", "questions.speckit.md"),
         outputs=("decisions.md",),
@@ -190,6 +219,21 @@ Also classify each decision as 일반 / 권한 / 과금. Be liberal with
 or a payout.
 
 Section 1 of your output is the only part open for discussion.
+
+## ready.md must declare the count in frontmatter
+
+Start the file with exactly this, before anything else:
+
+```
+---
+ready_open_count: <number of items still open in section 1>
+---
+```
+
+The gate reads that number and nothing else. It does not count your
+table and it does not read your prose - a previous run wrote "24 open"
+in the heading and the word 없음 in an unrelated sentence, and a
+prose-reading gate called the audit clean.
 """,
         inputs=("spec.md", "decisions.md", "sources/*"),
         outputs=("ready.md",),

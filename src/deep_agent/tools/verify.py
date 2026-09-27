@@ -88,10 +88,19 @@ def check_human_gate(
     rescans independently and takes the union.
     """
     sdd: dict[str, Any] = dict(state.get("sdd") or {})
-    decisions: list[dict] = list(sdd.get("decisions") or [])
+    decisions = sdd.get("decisions")   # None = unreadable, not empty
     terms = gates.load_sensitive_terms()
 
-    raised = gates.human_gate_items(decisions, terms)
+    if (blocked := gates.check_human_gate(decisions, terms)) is not None and decisions is None:
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(f"GateReject: {blocked}", tool_call_id=tool_call_id)
+                ]
+            }
+        )
+
+    raised = gates.human_gate_items(decisions or [], terms)
     pending = [d for d in raised if not (d.get("answer") or "").strip()]
 
     if not pending:
@@ -139,6 +148,7 @@ def check_human_gate(
         )
 
     by_id = {str(a["item_id"]): a for a in answers}
+    decisions = list(decisions or [])
     for d in decisions:
         if (a := by_id.get(str(d.get("id")))) is not None:
             d["answer"] = a.get("choice")
