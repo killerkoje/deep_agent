@@ -27,7 +27,7 @@ from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
-from .. import skills_loader
+from .. import gates, skills_loader
 from . import fs
 from ..llm import _price
 from ..models_catalog import spawnable_ids
@@ -46,19 +46,29 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _reject(code: str, message: str, tool_call_id: str, sdd: dict, skill: str | None):
-    """Gate rejections come back as a ToolMessage, not an exception.
+def _reject(verdict: gates.GateReject, tool_call_id: str, sdd: dict):
+    """Translate a gate verdict into this world's currency: a ToolMessage.
 
     Raising would kill the graph and teach Main nothing. As a message,
     Main reads why it was blocked and replans - fail-closed and
     autonomous at the same time (docs/gates.md 1.2).
+
+    The rejection is also kept in `sdd.gate_rejects`, which main_agent
+    re-injects next turn so Main does not walk into the same wall twice.
     """
     rejects = list(sdd.get("gate_rejects") or [])
-    rejects.append({"code": code, "message": message, "skill": skill, "at": _now()})
+    rejects.append(
+        {
+            "code": verdict.code,
+            "message": verdict.message,
+            "skill": verdict.skill,
+            "at": _now(),
+        }
+    )
     return Command(
         update={
             "messages": [
-                ToolMessage(f"GateReject: {code} — {message}", tool_call_id=tool_call_id)
+                ToolMessage(f"GateReject: {verdict}", tool_call_id=tool_call_id)
             ],
             "sdd": {**sdd, "gate_rejects": rejects[-10:]},
         }
@@ -80,30 +90,30 @@ def spawn(
     see this conversation.
     """
     sdd: dict[str, Any] = dict(state.get("sdd") or {})
+    files: dict[str, str] = state.get("files") or {}
 
-    # --- gates (pure functions; S3 moves them into gates.py) ---
-    try:
-        sk = skills_loader.load(skill)
-    except skills_loader.UnknownSkill as exc:
-        return _reject("G_SKILL_KNOWN", str(exc), tool_call_id, sdd, skill)
+    # --- gates ---------------------------------------------------
+    # The verdict comes from gates.py, which knows nothing about
+    # LangGraph. All this does is translate it into a ToolMessage. The
+    # HTTP handler translates the same verdict into a 400; CI into an
+    # exit code. That is why the check does not live here.
 
-    if model not in spawnable_ids():
-        return _reject(
-            "G_MODEL_KNOWN",
-            f"{model!r} is not in the catalog",
-            tool_call_id,
-            sdd,
-            skill,
-        )
+    # A spec edited after verification stops being verified. Checked
+    # here rather than inside allow_spawn because it needs the files.
+    if gates.spec_drifted(sdd, files):
+        sdd["verify_passed"] = False
 
-    if skill in {"implement", "qa"} and not sdd.get("verify_passed"):
-        return _reject(
-            "G_NO_IMPL_WITHOUT_VERIFY",
-            "verify_passed=false",
-            tool_call_id,
-            sdd,
-            skill,
-        )
+    verdict = gates.allow_spawn(
+        sdd,
+        skill,
+        model,
+        catalog=spawnable_ids(),
+        known_skills=skills_loader.SKILLS,
+    )
+    if verdict is not None:
+        return _reject(verdict, tool_call_id, sdd)
+
+    sk = skills_loader.load(skill)
 
     # --- isolated run ---
     spawn_id = f"sp_{uuid.uuid4().hex[:12]}"

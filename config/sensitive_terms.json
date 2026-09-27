@@ -1,0 +1,24 @@
+{
+  "_comment": "Vocabulary the gate scans for on its own, independently of how the AI classified each decision. The two lists are UNIONed, not intersected - the agent cannot clear its own stop by calling something 일반. False positives cost one question; a miss costs a leak or a payout, so lean inclusive. Grow these per project.",
+  "_schema_note": "Matching is case-insensitive substring on the decision text and on the spec section heading it belongs to.",
+
+  "권한": [
+    "권한", "역할", "롤", "조회 범위", "조회범위", "접근", "노출", "공개",
+    "마스킹", "가림", "비식별", "개인정보", "민감정보",
+    "관리자", "어드민", "본사", "지점장", "담당자만",
+    "isAdmin", "isHQ", "role", "permission", "scope", "acl", "rbac",
+    "인증", "인가", "토큰", "세션", "로그인"
+  ],
+
+  "과금": [
+    "금액", "매출", "정산", "차감", "환불", "취소 수수료",
+    "할인", "쿠폰", "적립", "포인트", "마일리지",
+    "수수료", "과금", "청구", "결제", "요금제", "구독",
+    "세금", "부가세", "원가", "마진", "단가",
+    "price", "billing", "invoice", "refund", "settlement"
+  ],
+
+  "section_headings": [
+    "권한", "보안", "정산", "과금", "결제", "요금"
+  ]
+}
