@@ -131,7 +131,7 @@ def spawn(
     # --- isolated run ---
     spawn_id = f"sp_{uuid.uuid4().hex[:12]}"
     result = run_subagent(
-        system_prompt=sk.prompt,
+        system_prompt=sk.prompt + skills_loader.contract_block(sk),
         brief=brief,
         model_id=model,
         tools=fs.resolve(sk.tool_names),

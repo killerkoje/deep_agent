@@ -374,24 +374,85 @@ def load_sensitive_terms(path: Path | None = None) -> dict[str, list[str]]:
     return {k: v for k, v in data.items() if not k.startswith("_")}
 
 
+def _haystack(d: dict[str, Any]) -> str:
+    return " ".join(
+        str(d.get(k, "")) for k in ("text", "rationale", "section", "title")
+    ).lower()
+
+
 def scan_sensitive(
-    decisions: list[dict[str, Any]], terms: dict[str, list[str]]
+    decisions: list[dict[str, Any]], terms: dict[str, Any]
 ) -> set[str]:
     """The gate's OWN read of which decisions touch permission or money.
 
-    Deliberately independent of `category`. The agent classifying its own
+    Independent of `category` on purpose: an agent classifying its own
     decision as 일반 must not be able to clear the stop that way.
+
+    Two tiers, because precision is what keeps this gate worth reading.
+    A `strong` term names an irreversible act and raises on its own. A
+    `weak` term is a domain noun - on a revenue dashboard every single
+    decision says 매출 - and only raises when a rule-setting word sits
+    with it. A gate that fires on almost everything gets rubber-stamped.
     """
+    strong: dict[str, list[str]] = terms.get("strong") or {}
+    weak: dict[str, list[str]] = terms.get("weak") or {}
+    rule_words = [w.lower() for w in (terms.get("rule_words") or [])]
+
+    # Older flat shape: {"권한": [...], "과금": [...]} - treat as strong.
+    if not strong and any(k in terms for k in ("권한", "과금")):
+        strong = {k: terms.get(k, []) for k in ("권한", "과금")}
+
     hits: set[str] = set()
     for d in decisions:
-        haystack = " ".join(
-            str(d.get(k, "")) for k in ("text", "rationale", "section", "title")
-        ).lower()
-        for bucket in ("권한", "과금"):
-            if any(t.lower() in haystack for t in terms.get(bucket, ())):
-                hits.add(str(d.get("id")))
-                break
+        hay = _haystack(d)
+        raised = any(
+            t.lower() in hay for bucket in strong.values() for t in bucket
+        )
+        if not raised and rule_words:
+            raised = _weak_rule_pair(hay, weak, rule_words)
+        if not raised:
+            # A role noun beside a scope word: "지점 관리자도 전체 ... 조회".
+            # Neither half is a signal alone, together they are the
+            # shape this gate exists for.
+            raised = _pair_near(
+                hay, terms.get("role_words") or [], terms.get("scope_words") or []
+            )
+        if raised:
+            hits.add(str(d.get("id")))
     return hits
+
+
+# A weak term and a rule word must sit together - "매출 정의",
+# "금액 기준" - not merely appear in the same paragraph. Co-occurrence
+# alone raised 15 of 19 decisions on a revenue dashboard, because 기준
+# and 정의 show up in every spec sentence ever written.
+_NEAR = 14
+
+
+def _pair_near(hay: str, left: list[str], right: list[str], window: int = 24) -> bool:
+    """Two term lists appearing within `window` characters of each other."""
+    for a in left:
+        a = a.lower()
+        i = hay.find(a)
+        while i != -1:
+            lo, hi = max(0, i - window), i + len(a) + window
+            if any(b.lower() in hay[lo:hi] for b in right):
+                return True
+            i = hay.find(a, i + 1)
+    return False
+
+
+def _weak_rule_pair(hay: str, weak: dict[str, list[str]], rules: list[str]) -> bool:
+    for bucket in weak.values():
+        for term in bucket:
+            t = term.lower()
+            start = hay.find(t)
+            while start != -1:
+                window = hay[start : start + len(t) + _NEAR]
+                if any(w in window for w in rules):
+                    return True
+                start = hay.find(t, start + 1)
+    return False
 
 
 def human_gate_items(

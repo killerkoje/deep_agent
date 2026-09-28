@@ -149,18 +149,23 @@ Prose is for people; the gates read this. Put it near the top:
 
 ```json
 [
-  {"id": "D-001", "tag": "[AI 결정]", "text": "the decision in one line",
+  {"id": "D-001", "title": "short label a person can scan",
+   "tag": "[AI 결정]", "text": "the decision in one line",
    "rationale": "a citation - file#Lnn or D-nnn, never 'it seems reasonable'",
    "alternatives": "what you rejected and why",
    "confidence": "상|중|하", "category": "일반"},
-  {"id": "D-002", "tag": "[정지 후보]", "text": "...", "category": "권한"}
+  {"id": "D-002", "title": "지점 관리자 랭킹 노출",
+   "tag": "[정지 후보]", "text": "...", "category": "권한",
+   "alternatives": "① 지점명 마스킹 / ② 비노출 / ③ 전체 공개"}
 ]
 ```
 
 Every item you answered and every item you left for a person goes in
 this list. One that is missing from it is invisible to the gate - and a
 permission question the gate cannot see is one that ships unanswered.
-Write the human-readable version below it as well.
+`title` is what a person sees in the stop list, and `alternatives` is
+what they choose between - a [정지 후보] without them is unanswerable.
+Write the human-readable version below the block as well.
 """,
         inputs=("spec.md", "questions.openspec.md", "questions.speckit.md"),
         outputs=("decisions.md",),
@@ -303,6 +308,28 @@ spec_gap an impl_bug lets the next attempt fill the gap by guessing.
         needs_workspace=True,
     ),
 }
+
+
+def contract_block(sk: "Skill") -> str:
+    """The skill's own paths, rendered into its prompt.
+
+    The shared prompt used to say "write your outputs at exactly the
+    declared paths" without ever showing them. Sub-agents invented
+    `specs/<name>.md` and `decision-log.md` instead, and four of eleven
+    spawns in one run were retries caused by that alone.
+    """
+    lines = ["", "## Your contract", ""]
+    lines.append(
+        "Readable inputs: "
+        + (", ".join(f"`{p}`" for p in sk.inputs) or "(none)")
+    )
+    if sk.outputs:
+        lines += ["", "Write EXACTLY these files, at these paths:"]
+        lines += [f"  - `{p}`" for p in sk.outputs]
+        lines += ["", "Any other path is rejected and the work is redone."]
+    else:
+        lines += ["", "No state files to write - report in your summary."]
+    return "\n".join(lines)
 
 
 class UnknownSkill(KeyError):
