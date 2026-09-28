@@ -147,3 +147,44 @@ def test_block_content_does_not_crash_the_run():
         ]
     )
     assert text_of(msg) == "spec.md written"
+
+
+# --- 5. a gate that no retry can satisfy ------------------------------
+
+
+def test_missing_tool_does_not_block():
+    """The third live run died here, and correctly.
+
+    openspec is not installed, so the gate rejected the skill's output
+    for a reason that had nothing to do with the output. Main escalated
+    the model, got the identical rejection, and called fail_run - which
+    is exactly what it should do when a wall does not move. The bug was
+    the wall: a missing binary is an environment fact, and a gate that
+    rejects what no retry can change just burns the loop.
+    """
+    assert gates.check_openspec_valid(0, None, skipped=True) is None
+
+
+def test_a_real_validation_failure_still_blocks():
+    rej = gates.check_openspec_valid(
+        1, {"findings": [{"message": "AC-003 has no acceptance rule"}]}
+    )
+    assert rej.code == "G_OPENSPEC_VALID"
+    assert "AC-003" in rej.message
+
+
+def test_the_report_says_which_checks_did_not_run():
+    """Not blocking must not mean pretending it passed."""
+    from deep_agent.report import build_report
+
+    report = build_report(
+        {
+            "sdd": {
+                "feature_id": "crm",
+                "skipped_validations": ["openspec binary not installed"],
+            }
+        }
+    )
+    assert "Checks that did not run" in report
+    assert "openspec binary not installed" in report
+    assert "unverified" in report

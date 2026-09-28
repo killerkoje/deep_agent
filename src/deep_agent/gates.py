@@ -137,12 +137,20 @@ def check_openspec_valid(
     The caller runs the CLI (that is I/O); this only reads the verdict,
     which keeps the rule testable without a subprocess.
 
-    `skipped=True` when the binary is absent - a missing tool must not
-    silently look like a pass, but it also must not block a local dev
-    loop, so it surfaces as its own message.
+    `skipped=True` - the binary is absent - returns None, i.e. does not
+    block. A missing tool is an environment fact, not a defect in the
+    work: retrying cannot fix it, and a gate that rejects something no
+    retry can change just burns the loop. A live run died exactly that
+    way, correctly: the skill produced good output, the gate rejected
+    it for a reason unrelated to the output, Main escalated the model,
+    got the identical rejection, and gave up.
+
+    Not silent, though. The caller records it so the total report says
+    the check did not run - "unverified" and "verified" must not read
+    the same.
     """
     if skipped:
-        return GateReject("G_OPENSPEC_VALID", "openspec not installed; validation skipped")
+        return None
     if exit_code == 0:
         return None
 

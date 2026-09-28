@@ -92,6 +92,12 @@ def build_report(state: dict[str, Any], summary: str = "") -> str:
     spent = (sdd.get("budget") or {}).get("spent_usd") or 0.0
     out += ["", f"**Total: {_fmt_usd(spent)}** across {len(history)} spawn(s).", ""]
 
+    if skipped := sdd.get("skipped_validations"):
+        # "not verified" and "verified" must not read the same.
+        out += ["## ⚠ Checks that did not run", ""]
+        out += [f"- {s}" for s in skipped]
+        out += ["", "Treat the corresponding claims as unverified.", ""]
+
     if rejects := sdd.get("gate_rejects"):
         out += ["## Gate rejections", ""]
         out += [

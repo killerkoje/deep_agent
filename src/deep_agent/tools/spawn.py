@@ -237,8 +237,19 @@ def _check_outputs(
     if skill == "openspec":
         workspace = sdd.get("target_repo_path")
         if not workspace or not sdd_cli.available("openspec"):
-            # Not installed locally is a known state, not a silent pass.
-            return gates.check_openspec_valid(0, None, skipped=True)
+            # Environment, not output quality. Does not block - no retry
+            # could fix it - but it is recorded so the report cannot
+            # claim a validation that never ran.
+            skipped = list(sdd.get("skipped_validations") or [])
+            reason = (
+                "openspec binary not installed"
+                if not sdd_cli.available("openspec")
+                else "no target_repo_path to validate against"
+            )
+            if reason not in skipped:
+                skipped.append(reason)
+            sdd["skipped_validations"] = skipped
+            return None
         res = sdd_cli.openspec_validate(workspace)
         return gates.check_openspec_valid(res.exit_code, res.json())
 
