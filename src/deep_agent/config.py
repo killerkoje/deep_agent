@@ -33,6 +33,7 @@ class Settings:
     user_id: str
     run_max_usd: float | None
     target_repo_path: str | None
+    subagent_backend: str
     models_catalog_path: Path
     workspace_root: Path
 
@@ -54,6 +55,10 @@ def load_settings() -> Settings:
         user_id=os.getenv("USER_ID", "default"),
         run_max_usd=_float_or_none(os.getenv("RUN_MAX_USD")),
         target_repo_path=os.getenv("TARGET_REPO_PATH"),
+        # "claude-cli" runs sub-agents on the Claude Code login already
+        # on the machine - no API key, and its built-in Read/Write/Bash
+        # are what make `implement` possible at all.
+        subagent_backend=os.getenv("SUBAGENT_BACKEND", "langgraph"),
         models_catalog_path=REPO_ROOT / "config" / "models.available.json",
         workspace_root=REPO_ROOT / "workspace",
     )

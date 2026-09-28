@@ -81,12 +81,22 @@ def text_of(msg: Any) -> str:
     return "\n".join(parts).strip()
 
 
-def get_chat_model(model: str, reasoning_effort: str | None = None) -> BaseChatModel:
-    """Build a chat model by id. Main passes its env-fixed model; spawn
-    passes whatever Main chose for that sub-agent."""
+def get_chat_model(
+    model: str,
+    reasoning_effort: str | None = None,
+    api_key: str | None = None,
+) -> BaseChatModel:
+    """Build a chat model by id.
+
+    `api_key` overrides the server's own - the deployed version is
+    bring-your-own-credentials, so the key can arrive per request.
+    """
     from langchain_openai import ChatOpenAI
 
-    kwargs: dict[str, Any] = {"model": model, "api_key": settings.openai_api_key}
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "api_key": api_key or settings.openai_api_key,
+    }
     if reasoning_effort:
         kwargs["reasoning_effort"] = reasoning_effort
     return ChatOpenAI(**kwargs)

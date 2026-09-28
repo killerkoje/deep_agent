@@ -120,9 +120,9 @@ def run_pipeline(script, decisions_md=DECISIONS_OK, resume=None, **kw):
     # remember which skill each spawn is for, so the right script runs
     real_spawn = spawn_mod.spawn.func
 
-    def patched(skill, model, brief, state, tool_call_id):
+    def patched(skill, brief, state, tool_call_id):
         _CURRENT_SKILL.set(skill)
-        return real_spawn(skill, model, brief, state, tool_call_id)
+        return real_spawn(skill, brief, state, tool_call_id)
 
     spawn_mod.spawn.func = patched
     spawn_mod.set_model_factory(factory)
@@ -145,8 +145,10 @@ def run_pipeline(script, decisions_md=DECISIONS_OK, resume=None, **kw):
         spawn_mod.set_model_factory(None)
 
 
-def sp(skill, model="gpt-6-sol", brief="go", cid="c"):
-    return tool_call("spawn", {"skill": skill, "model": model, "brief": brief}, cid)
+def sp(skill, model=None, brief="go", cid="c"):
+    """`model` is accepted and ignored - the operator picks it now, and
+    several tests still pass one to document what they used to assert."""
+    return tool_call("spawn", {"skill": skill, "brief": brief}, cid)
 
 
 HAPPY = [
@@ -183,7 +185,7 @@ def test_report_records_skill_and_model_per_spawn():
     out, _, _ = run_pipeline(HAPPY, sources={"prd.md": "# PRD"})
     report = Workspace.for_thread("th_pipe").read("report.md")
 
-    assert "spec-write" in report and "gpt-6-sol" in report
+    assert "spec-write" in report and "gpt-6-luna" in report
     assert "Total:" in report
     # no role-to-model table anywhere - just what was chosen per call
     assert "default_for_skill" not in report

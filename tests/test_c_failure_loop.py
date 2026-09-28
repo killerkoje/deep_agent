@@ -80,7 +80,7 @@ def test_spec_gap_then_implement_is_blocked():
         [
             failing_e2e(),
             diagnose("spec_gap"),
-            tool_call("spawn", {"skill": "implement", "model": "gpt-6-astra", "brief": "fix"}, "s1"),
+            tool_call("spawn", {"skill": "implement", "brief": "fix"}, "s1"),
         ]
     )
     assert "G_NO_IMPL_WITHOUT_VERIFY" in texts(out)
@@ -98,7 +98,7 @@ def test_rebuilding_without_a_diagnosis_is_refused():
     out = run(
         [
             failing_e2e(),
-            tool_call("spawn", {"skill": "implement", "model": "gpt-6-astra", "brief": "fix"}, "s1"),
+            tool_call("spawn", {"skill": "implement", "brief": "fix"}, "s1"),
         ]
     )
     assert "G_TRIAGE_FIRST" in texts(out)
@@ -111,7 +111,7 @@ def test_a_stale_diagnosis_does_not_count():
             failing_e2e("e1"),
             diagnose("impl_bug", "d1"),
             failing_e2e("e2"),  # a new failure; the old analysis is stale
-            tool_call("spawn", {"skill": "implement", "model": "gpt-6-sol", "brief": "x"}, "s1"),
+            tool_call("spawn", {"skill": "implement", "brief": "x"}, "s1"),
         ]
     )
     assert "predates this failure" in texts(out)

@@ -33,9 +33,9 @@ def api(monkeypatch):
 
     real = spawn_mod.spawn.func
 
-    def patched(skill, model, brief, state, tool_call_id):
+    def patched(skill, brief, state, tool_call_id):
         _CURRENT_SKILL.set(skill)
-        return real(skill, model, brief, state, tool_call_id)
+        return real(skill, brief, state, tool_call_id)
 
     spawn_mod.spawn.func = patched
     spawn_mod.set_model_factory(factory)

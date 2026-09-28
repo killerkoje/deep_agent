@@ -12,34 +12,23 @@ from typing import Any
 
 from langchain_core.messages import SystemMessage
 
+from .. import skills_loader
 from ..llm import get_main_model, usage_from_message
-from ..models_catalog import list_models_for_prompt
 from ..tools.todos import recite
 
 SYSTEM_PROMPT = """\
 You are Main, the top-level orchestrator of an SDD pipeline.
 
 You do not write specs or code. You spawn sub-agents that do, and you
-decide which skill, which model, and when. Exactly one tool call per turn.
+decide which skill and when. Exactly one tool call per turn.
 
 ## Hard rules
 
 1. You never author spec or code content. Only spawn.
-2. `model` is required on every spawn. There is no role-to-model table.
-   Read the available models below and choose per call.
-
-   **Start cheap and escalate on evidence.** Open with the cheapest
-   model that could plausibly do the job. If it fails a gate or returns
-   something thin, retry the same skill on a stronger one - that is
-   what the rejection is telling you. Going straight to the strongest
-   model spends 100x on work the cheapest often handles: a previous run
-   chose the top tier for every spawn and cost 35x what it needed to.
-
-   Spend the strong model where a mistake is SILENT rather than loud -
-   adversarial reading across distant sections, spotting an assumption
-   that reads as true, holding one codebase consistent. A formatting
-   slip is loud; a gate catches it and you retry. A missed contradiction
-   is silent and ships.
+2. You do not choose models. `spawn` takes no `model` argument - the
+   operator picked one for this session. A gate rejection tells you the
+   output was wrong; it never tells you a bigger model would have
+   helped. Fix the brief, or pick a different skill.
 3. Blanks in the spec are YOURS to fill via the `decide` skill. Do not
    stop to ask a human. But every `[AI 결정]` must carry a citation, the
    alternative you rejected, and a confidence level - the code rejects
@@ -53,8 +42,8 @@ decide which skill, which model, and when. Exactly one tool call per turn.
 7. Never split `implement` across parallel sub-agents. One at a time.
 8. After `qa.failed`, run `e2e-triage` before re-implementing. Going
    straight back to `implement` lets a spec gap get filled by a guess.
-9. On failure, replan: same skill with a different model, or a different
-   skill. Say why.
+9. On failure, replan: sharpen the brief and retry, or pick a different
+   skill. Say why. Retrying the identical brief is not a plan.
 
 ## Pipeline (the usual path)
 
@@ -98,13 +87,42 @@ def build_context(state: dict[str, Any]) -> list:
             + "\n".join(f"- {r.get('code')}: {r.get('message')}" for r in rejects)
         )
 
-    blocks.append("## Available models\n" + list_models_for_prompt())
+    # The list Main sees must be the list the gate checks. When the two
+    # drift, Main spends the run proposing models G_MODEL_KNOWN will
+    # reject - on the first run against the CLI backend it tried six
+    # OpenAI ids, was refused each time, and gave up. Correctly.
+    blocks.append("## Available models\n" + _models_block(state))
 
     return [
         SystemMessage(SYSTEM_PROMPT),
         *state.get("messages", []),
         SystemMessage("\n\n".join(blocks)),
     ]
+
+
+def _models_block(state: dict[str, Any]) -> str:
+    from .. import backends
+    from ..policy import get_policy
+
+    thread_id = state.get("thread_id") or ""
+    creds = backends.get_credentials(thread_id)
+    backend = backends.backend_for(creds)
+
+    lines = [f"(sub-agents run on the `{backend.name}` backend)"]
+
+    # Tell Main the policy rather than silently overriding its choices -
+    # otherwise it spends turns escalating against a ceiling it cannot see.
+    if session := get_policy(thread_id):
+        lines.append(session.describe())
+        lines.append("")
+    for m in backend.models():
+        price = ""
+        if m.get("input_per_1m") is not None:
+            price = f" | in ${m['input_per_1m']}/1M out ${m.get('output_per_1m')}/1M"
+        lines.append(f"- {m['id']}{price}")
+        if note := m.get("notes"):
+            lines.append(f"    {note}")
+    return "\n".join(lines)
 
 
 def make_main_agent_node(tools: list, model_factory=get_main_model):

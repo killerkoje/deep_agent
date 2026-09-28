@@ -27,21 +27,13 @@ from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
-from .. import gates, sdd_cli, skills_loader
-from . import fs
-from ..llm import _price
-from ..models_catalog import spawnable_ids
+from .. import backends, gates, policy as policy_mod, sdd_cli, skills_loader
 from ..state import STAGE_OF_EVENT
 from ..workspace import Workspace
-from ..subagent import run_subagent
-
-# Injected by tests so the loop can run without an API key.
-_MODEL_FACTORY = None
-
 
 def set_model_factory(factory) -> None:
-    global _MODEL_FACTORY
-    _MODEL_FACTORY = factory
+    """Tests drive the langgraph backend with scripted models."""
+    backends.set_model_factory(factory)
 
 
 def _now() -> str:
@@ -84,16 +76,19 @@ def _reject(verdict: gates.GateReject, tool_call_id: str, sdd: dict):
 @tool
 def spawn(
     skill: str,
-    model: str,
     brief: str,
     state: Annotated[dict, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """Run one skill in an isolated sub-agent session and return its summary.
 
-    `model` is required and chosen by you per call - there is no default
-    per skill. `brief` is everything the sub-agent will know: it cannot
-    see this conversation.
+    There is no `model` argument. The operator chose the model for this
+    session; a failed spawn is a signal about the brief or the skill,
+    not about the model, and you have no evidence that a bigger one
+    would have done better.
+
+    `brief` is everything the sub-agent will know - it cannot see this
+    conversation, so say what it needs in full.
     """
     sdd: dict[str, Any] = dict(state.get("sdd") or {})
     ws = Workspace.for_thread(state.get("thread_id") or sdd.get("run_id") or "default")
@@ -110,11 +105,31 @@ def spawn(
     if gates.spec_drifted(sdd, ws.read_many(["spec.md", "meta/spec.sha256"])):
         sdd["verify_passed"] = False
 
+    # Which backend runs this depends on what the caller brought - a
+    # Claude login, an OpenAI key, or the server's own default.
+    thread_id = state.get("thread_id") or ""
+    creds = backends.get_credentials(thread_id)
+    backend = backends.backend_for(creds)
+    catalog = backend.models()
+
+    # Apply the session's model policy before anything is spent. An
+    # out-of-policy model is refused, never quietly downgraded - a
+    # substitution that nobody is told about is how a run finishes
+    # looking normal after being done by a weaker model than was asked.
+    session = policy_mod.get_policy(thread_id)
+    model, policy_verdict = policy_mod.resolve_spawn_model(skill, session, catalog)
+    if policy_verdict is not None:
+        return _reject(policy_verdict, tool_call_id, sdd)
+    if model is None:  # no session policy (local run) - server default
+        from ..config import settings
+
+        model = settings.main_model
+
     verdict = gates.allow_spawn(
         sdd,
         skill,
         model,
-        catalog=spawnable_ids(),
+        catalog={m["id"] for m in catalog},
         known_skills=skills_loader.SKILLS,
     )
 
@@ -137,20 +152,20 @@ def spawn(
     spawn_id = f"sp_{uuid.uuid4().hex[:12]}"
     workdir = ws.stage_spawn(spawn_id, sk.inputs)
 
-    result = run_subagent(
+    result = backend.run(
         system_prompt=sk.prompt + skills_loader.contract_block(sk),
         brief=brief,
-        model_id=model,
-        tools=fs.resolve(sk.tool_names),
+        model=model,
         workdir=str(workdir),
+        tool_names=sk.tool_names,
+        creds=creds,
         repo=sdd.get("target_repo_path") if sk.needs_workspace else None,
-        model=_MODEL_FACTORY(model) if _MODEL_FACTORY else None,
     )
 
     produced_paths = ws.collect(workdir, sk.outputs)
 
     # --- record what it cost and what it did ---
-    cost = _price(model, result["tokens_in"], result["tokens_out"])
+    cost = result.cost_usd
     budget = dict(sdd.get("budget") or {})
     budget["spent_usd"] = round(float(budget.get("spent_usd") or 0.0) + cost, 6)
 
@@ -162,10 +177,11 @@ def spawn(
             "model": model,
             "brief": brief,
             "at": _now(),
-            "result": result["summary"][:500],
+            "result": result.summary[:500],
             "event": sk.event,
-            "tokens_in": result["tokens_in"],
-            "tokens_out": result["tokens_out"],
+            "backend": backend.name,
+            "tokens_in": result.tokens_in,
+            "tokens_out": result.tokens_out,
             "cost_usd": round(cost, 6),
         }
     )
@@ -204,7 +220,7 @@ def spawn(
             update={
                 "messages": [
                     ToolMessage(
-                        f"[{skill} @ {model}] {result['summary']}\n"
+                        f"[{skill} @ {model}] {result.summary}\n"
                         f"GateReject: {after}",
                         tool_call_id=tool_call_id,
                     )
@@ -218,7 +234,7 @@ def spawn(
         update={
             "messages": [
                 ToolMessage(
-                    f"[{skill} @ {model}] {result['summary']}",
+                    f"[{skill} @ {model}] {result.summary}",
                     tool_call_id=tool_call_id,
                 )
             ],

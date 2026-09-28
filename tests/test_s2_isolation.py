@@ -54,8 +54,8 @@ def run_main(script, sub=sub_factory, **kw):
         spawn_mod.set_model_factory(None)
 
 
-def spawn_call(skill="spec-write", model="gpt-6-sol", brief="draft it", cid="c1"):
-    return tool_call("spawn", {"skill": skill, "model": model, "brief": brief}, cid)
+def spawn_call(skill="spec-write", model=None, brief="draft it", cid="c1"):
+    return tool_call("spawn", {"skill": skill, "brief": brief}, cid)
 
 
 # --- THE test --------------------------------------------------------
@@ -198,18 +198,12 @@ def test_undeclared_output_is_not_merged_back():
 # --- gates come back as messages, not exceptions ---------------------
 
 
-def test_unknown_model_is_rejected_and_main_replans():
-    out, _ = run_main(
-        [spawn_call(model="gpt-9-imaginary", cid="c1"), spawn_call(cid="c2")],
-        sources={"prd.md": "# PRD"},
-    )
+def test_spawn_takes_no_model_argument():
+    """Main cannot pick a model. An accepted-and-ignored parameter would
+    be a silent substitution; removing it makes that impossible."""
+    from deep_agent.tools.spawn import spawn
 
-    msgs = [m.content for m in out["messages"] if isinstance(m, ToolMessage)]
-    assert "GateReject: G_MODEL_KNOWN" in msgs[0]
-    assert SUB_FINAL in msgs[1]  # recovered on the retry
-
-    # the rejection is in Main's context so it does not hit the same wall
-    assert out["sdd"]["gate_rejects"][0]["code"] == "G_MODEL_KNOWN"
+    assert "model" not in spawn.args_schema.model_json_schema()["properties"]
 
 
 def test_implement_blocked_until_verify_passes():
@@ -226,11 +220,10 @@ def test_unknown_skill_is_rejected():
     ][0].content
 
 
-def test_embedding_model_is_not_spawnable():
-    out, _ = run_main([spawn_call(model="text-embedding-3-small")], sources={"prd.md": "#"})
-    assert "G_MODEL_KNOWN" in [
-        m for m in out["messages"] if isinstance(m, ToolMessage)
-    ][0].content
+def test_embedding_models_are_not_in_the_spawnable_catalog():
+    from deep_agent.models_catalog import spawnable_ids
+
+    assert "text-embedding-3-small" not in spawnable_ids()
 
 
 # --- accounting ------------------------------------------------------
@@ -241,7 +234,7 @@ def test_spawn_is_recorded_with_skill_model_and_cost():
     entry = out["sdd"]["spawn_history"][0]
 
     assert entry["skill"] == "spec-write"
-    assert entry["model"] == "gpt-6-sol"
+    assert entry["model"]  # whatever the operator's policy resolved to
     assert entry["brief"] == "draft it"
     assert entry["event"] == "spec.draft.ready"
     assert {"tokens_in", "tokens_out", "cost_usd"} <= set(entry)

@@ -23,11 +23,11 @@ from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
-from . import gates
+from . import backends, gates, skills_loader
+from .policy import ModelPolicy, set_policy, validate_policy, validate_skills
 from .checkpoint import get_checkpointer, is_durable
 from .config import settings
 from .graph import build_graph
-from .models_catalog import spawnable_models
 from .state import initial_state
 from .workspace import Workspace
 
@@ -73,6 +73,16 @@ def snapshot(thread_id: str):
 # --- models ----------------------------------------------------------
 
 
+class Auth(BaseModel):
+    """What the caller brought. Never stored beyond process memory."""
+
+    provider: str = Field(
+        ..., description="claude-cli | openai | anthropic"
+    )
+    api_key: str | None = None
+    oauth_token: str | None = None
+
+
 class CreateThread(BaseModel):
     feature_id: str
     sources: dict[str, str] = Field(
@@ -80,6 +90,18 @@ class CreateThread(BaseModel):
     )
     target_repo_path: str | None = None
     max_iterations: int = 3
+
+    # Step 3 of the flow: required, the user picks it.
+    main_model: str | None = None
+    # Step 4: optional - sub-agents inherit main_model when omitted.
+    subagent_model: str | None = None
+    # A few light roles an operator wants pinned cheaper. Everything
+    # not named here inherits. Nothing may exceed main_model's tier.
+    skill_models: dict[str, str] = Field(default_factory=dict)
+    # Cost escape hatch: every spawn on one model, Main's choice ignored.
+    force_subagent_model: bool = False
+
+    auth: Auth | None = None
 
 
 class GateAnswer(BaseModel):
@@ -105,10 +127,46 @@ def health() -> dict:
     }
 
 
+@app.post("/api/v1/auth")
+def check_auth(body: Auth, _: None = Depends(auth)) -> dict:
+    """Step 1-2 of the flow: validate what the caller brought.
+
+    Nothing is stored here - credentials attach to a thread when one is
+    created. This only answers "will this work, and what can it run".
+    """
+    creds = backends.Credentials(
+        provider=body.provider, api_key=body.api_key, oauth_token=body.oauth_token
+    )
+    backend = backends.backend_for(creds)
+    why = backend.available(creds)
+    if why is not None:
+        raise HTTPException(400, why)
+
+    return {
+        "ok": True,
+        "backend": backend.name,
+        "identity": creds.redacted(),
+        "models": backend.models(),
+    }
+
+
 @app.get("/api/v1/models")
-def models(_: None = Depends(auth)) -> dict:
-    """What Main may choose from. Capability notes, no skill mapping."""
-    return {"models": spawnable_models()}
+def models(provider: str | None = None, _: None = Depends(auth)) -> dict:
+    """Step 3-4: what this caller can pick from.
+
+    The list depends on the backend - a Claude login sees fable/opus/
+    sonnet/haiku, an OpenAI key sees the gpt-6 tiers. It is also the
+    exact list the gate checks, so a choice made here cannot be
+    rejected later as unknown.
+    """
+    creds = backends.Credentials(provider=provider) if provider else None
+    backend = backends.backend_for(creds)
+    return {"backend": backend.name, "models": backend.models()}
+
+
+@app.get("/api/v1/backends")
+def list_backends(_: None = Depends(auth)) -> dict:
+    return {"backends": backends.available_backends()}
 
 
 @app.post("/api/v1/threads", status_code=201)
@@ -128,6 +186,41 @@ def create_thread(body: CreateThread, _: None = Depends(auth)) -> dict:
         max_iterations=body.max_iterations,
     )
     state["sdd"]["last_event"] = "sources.ready"
+
+    # Credentials live in process memory keyed by thread, never in
+    # AgentState - state is checkpointed to disk and later Postgres, and
+    # a checkpoint carrying an API key is a leak sitting in a backup.
+    creds = None
+    if body.auth:
+        creds = backends.Credentials(
+            provider=body.auth.provider,
+            api_key=body.auth.api_key,
+            oauth_token=body.auth.oauth_token,
+        )
+        if (why := backends.backend_for(creds).available(creds)) is not None:
+            raise HTTPException(400, why)
+        backends.set_credentials(thread_id, creds)
+
+    backend = backends.backend_for(creds)
+    if body.main_model:
+        policy = ModelPolicy(
+            main_model=body.main_model,
+            subagent_model=body.subagent_model,
+            skill_models=body.skill_models,
+            force_subagent_model=body.force_subagent_model,
+        )
+        # A pin naming a skill that does not exist would never apply,
+        # and the operator would believe they had set it.
+        if (bad := validate_skills(policy, skills_loader.SKILLS)) is not None:
+            backends.clear_credentials(thread_id)
+            raise HTTPException(400, str(bad))
+        # Refused up front, before a token is spent - and refused rather
+        # than clamped, so nobody discovers afterwards that their run was
+        # quietly done on a cheaper model than they asked for.
+        if (bad := validate_policy(policy, backend.models())) is not None:
+            backends.clear_credentials(thread_id)
+            raise HTTPException(400, str(bad))
+        set_policy(thread_id, policy)
 
     out = graph().invoke(
         {**state, "messages": [HumanMessage(f"Feature: {body.feature_id}. Begin.")]},

@@ -159,13 +159,13 @@ def test_both_hole_finders_can_run_from_one_turn():
         tool_calls=[
             {
                 "name": "spawn",
-                "args": {"skill": "openspec", "model": "gpt-6-astra", "brief": "holes"},
+                "args": {"skill": "openspec", "brief": "holes"},
                 "id": "p1",
                 "type": "tool_call",
             },
             {
                 "name": "spawn",
-                "args": {"skill": "spec-kit", "model": "gpt-6-sol", "brief": "holes"},
+                "args": {"skill": "spec-kit", "brief": "holes"},
                 "id": "p2",
                 "type": "tool_call",
             },
@@ -180,7 +180,6 @@ def test_both_hole_finders_can_run_from_one_turn():
     skills = [h["skill"] for h in out["sdd"]["spawn_history"]]
     assert skills == ["spec-write", "openspec", "spec-kit"]
 
-    # different models, chosen per call - no role-to-model table
-    models = {h["skill"]: h["model"] for h in out["sdd"]["spawn_history"]}
-    assert models["openspec"] == "gpt-6-astra"
-    assert models["spec-kit"] == "gpt-6-sol"
+    # Both ran, independently, from one turn. Which model each used is
+    # the operator's setting now, not a per-call choice.
+    assert all(h["model"] for h in out["sdd"]["spawn_history"])
