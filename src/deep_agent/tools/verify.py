@@ -16,6 +16,7 @@ from langgraph.prebuilt import InjectedState
 from langgraph.types import Command, interrupt
 
 from .. import gates
+from ..workspace import Workspace
 
 
 @tool
@@ -29,13 +30,22 @@ def run_verify(
     only this gate does, and it will refuse if any of the six fails.
     """
     sdd: dict[str, Any] = dict(state.get("sdd") or {})
-    files: dict[str, str] = dict(state.get("files") or {})
+    ws = Workspace.for_thread(state.get("thread_id") or sdd.get("run_id") or "default")
 
-    result = gates.verify_spec(sdd, files, sdd.get("decisions") or [])
+    # Gates stay content-based and pure, so the caller reads what they
+    # need off disk and hands it over.
+    content = ws.read_many(
+        [
+            "spec.md", "decisions.md", "questions.openspec.md",
+            "questions.speckit.md", "meta/crosscheck.json",
+            "meta/spec.sha256", "meta/verify-token",
+        ]
+    )
+    result = gates.verify_spec(sdd, content, sdd.get("decisions") or [])
 
     if not result.passed:
         sdd["verify_passed"] = False
-        files.pop("meta/verify-token", None)
+        ws.resolve("meta/verify-token").unlink(missing_ok=True)
         reasons = "\n".join(f"  - {r}" for r in result.reasons)
         return Command(
             update={
@@ -46,14 +56,14 @@ def run_verify(
                     )
                 ],
                 "sdd": {**sdd, "last_event": "spec.verify.failed"},
-                "files": files,
+                "files": ws.index(),
             }
         )
 
     # Acting on the verdict is the caller's job, and this is the caller.
-    files["meta/spec.sha256"] = result.spec_hash
-    files["meta/verify-token"] = gates.verify_token(
-        sdd.get("run_id", ""), result.spec_hash
+    ws.write("meta/spec.sha256", result.spec_hash)
+    ws.write(
+        "meta/verify-token", gates.verify_token(sdd.get("run_id", ""), result.spec_hash)
     )
     sdd.update(
         {
@@ -71,7 +81,7 @@ def run_verify(
                 )
             ],
             "sdd": sdd,
-            "files": files,
+            "files": ws.index(),
         }
     )
 

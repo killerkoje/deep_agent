@@ -33,3 +33,6 @@ blob-report/
 .idea/
 .DS_Store
 Thumbs.db
+
+# live run artifacts
+/workspace/

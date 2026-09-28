@@ -40,8 +40,8 @@ class SubAgentState(TypedDict, total=False):
     """
 
     messages: Annotated[list, add_messages]
-    files: dict[str, str]  # only what the skill declared as input
-    workspace: str | None  # real disk path, for skills that touch code
+    workdir: str | None    # staged dir holding only the declared inputs
+    repo: str | None       # target repo, for skills that touch code
     turns: int
     tokens_in: int
     tokens_out: int
@@ -92,8 +92,8 @@ def run_subagent(
     brief: str,
     model_id: str,
     tools: list | None = None,
-    files: dict[str, str] | None = None,
-    workspace: str | None = None,
+    workdir: str | None = None,
+    repo: str | None = None,
     model: BaseChatModel | None = None,
 ) -> dict[str, Any]:
     """Run one isolated session and return only what Main is allowed to see.
@@ -107,8 +107,8 @@ def run_subagent(
     result = graph.invoke(
         {
             "messages": [SystemMessage(system_prompt), HumanMessage(brief)],
-            "files": dict(files or {}),
-            "workspace": workspace,
+            "workdir": workdir,
+            "repo": repo,
             "turns": 0,
             "tokens_in": 0,
             "tokens_out": 0,
@@ -118,7 +118,6 @@ def run_subagent(
     last = result["messages"][-1]
     return {
         "summary": text_of(last) or "(no summary returned)",
-        "files": result.get("files", {}),
         "turns": result.get("turns", 0),
         "tokens_in": result.get("tokens_in", 0),
         "tokens_out": result.get("tokens_out", 0),

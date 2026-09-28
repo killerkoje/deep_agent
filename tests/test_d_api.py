@@ -20,7 +20,7 @@ from deep_agent import app as app_mod
 from deep_agent.graph import build_graph
 from deep_agent.tools import spawn as spawn_mod
 from tests.fakes import ScriptedChatModel, tool_call
-from tests.test_s7_pipeline import DECISIONS_SNEAKY, HAPPY, route_sub
+from tests.test_s7_pipeline import _CURRENT_SKILL, DECISIONS_SNEAKY, HAPPY, route_sub
 
 TOKEN = {"Authorization": "Bearer change-me"}
 
@@ -29,12 +29,12 @@ TOKEN = {"Authorization": "Bearer change-me"}
 def api(monkeypatch):
     """A client wired to scripted models, sharing one graph so the
     checkpointer persists across requests the way it would in a server."""
-    factory, box = route_sub(DECISIONS_SNEAKY)
+    factory, _ = route_sub(DECISIONS_SNEAKY)
 
     real = spawn_mod.spawn.func
 
     def patched(skill, model, brief, state, tool_call_id):
-        box["skill"] = skill
+        _CURRENT_SKILL.set(skill)
         return real(skill, model, brief, state, tool_call_id)
 
     spawn_mod.spawn.func = patched

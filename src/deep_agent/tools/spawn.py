@@ -32,6 +32,7 @@ from . import fs
 from ..llm import _price
 from ..models_catalog import spawnable_ids
 from ..state import STAGE_OF_EVENT
+from ..workspace import Workspace
 from ..subagent import run_subagent
 
 # Injected by tests so the loop can run without an API key.
@@ -95,7 +96,8 @@ def spawn(
     see this conversation.
     """
     sdd: dict[str, Any] = dict(state.get("sdd") or {})
-    files: dict[str, str] = state.get("files") or {}
+    ws = Workspace.for_thread(state.get("thread_id") or sdd.get("run_id") or "default")
+    files: dict[str, str] = state.get("files") or {}   # path -> sha256
 
     # --- gates ---------------------------------------------------
     # The verdict comes from gates.py, which knows nothing about
@@ -105,7 +107,7 @@ def spawn(
 
     # A spec edited after verification stops being verified. Checked
     # here rather than inside allow_spawn because it needs the files.
-    if gates.spec_drifted(sdd, files):
+    if gates.spec_drifted(sdd, ws.read_many(["spec.md", "meta/spec.sha256"])):
         sdd["verify_passed"] = False
 
     verdict = gates.allow_spawn(
@@ -129,16 +131,23 @@ def spawn(
     sk = skills_loader.load(skill)
 
     # --- isolated run ---
+    # A directory holding only the declared inputs. On disk the
+    # contract is enforced by absence: qa-report.md is not there to be
+    # read, rather than guarded by a check something could route round.
     spawn_id = f"sp_{uuid.uuid4().hex[:12]}"
+    workdir = ws.stage_spawn(spawn_id, sk.inputs)
+
     result = run_subagent(
         system_prompt=sk.prompt + skills_loader.contract_block(sk),
         brief=brief,
         model_id=model,
         tools=fs.resolve(sk.tool_names),
-        files=skills_loader.select_inputs(state.get("files") or {}, sk.inputs),
-        workspace=sdd.get("target_repo_path") if sk.needs_workspace else None,
+        workdir=str(workdir),
+        repo=sdd.get("target_repo_path") if sk.needs_workspace else None,
         model=_MODEL_FACTORY(model) if _MODEL_FACTORY else None,
     )
+
+    produced_paths = ws.collect(workdir, sk.outputs)
 
     # --- record what it cost and what it did ---
     cost = _price(model, result["tokens_in"], result["tokens_out"])
@@ -165,14 +174,9 @@ def spawn(
     if stage := STAGE_OF_EVENT.get(sk.event or ""):
         sdd["stage"] = stage
 
-    # Only declared outputs are merged back; a sub-agent cannot write
-    # wherever it likes in the shared workspace.
-    produced = {
-        path: content
-        for path, content in (result["files"] or {}).items()
-        if path in sk.outputs or any(path.startswith(o.rstrip("*")) for o in sk.outputs)
-    }
-    merged_files = {**files, **produced}
+    # State carries the index, not the bytes.
+    merged_files = ws.index()
+    produced = set(produced_paths)
 
     # decisions.md is the artifact people read; sdd.decisions is what
     # the gates read. Re-parsed after any skill that touches it, so the
@@ -181,19 +185,19 @@ def spawn(
         # None means "unreadable", which must not become an empty list -
         # an empty list reads as "no decisions to check" and clears the
         # human gate. Kept as None so the gates refuse instead.
-        sdd["decisions"] = gates.parse_decisions(produced["decisions.md"])
+        sdd["decisions"] = gates.parse_decisions(ws.read("decisions.md"))
 
     # Same idea for ready.md: G_READY needs a number, not prose. Left
     # as None when the audit has not run or its output is unparseable -
     # "no audit" must not read as "audit found nothing".
     if "ready.md" in produced:
-        sdd["ready_open_count"] = gates.count_ready_open(produced["ready.md"])
+        sdd["ready_open_count"] = gates.count_ready_open(ws.read("ready.md"))
 
     # --- post-run gates ------------------------------------------
     # The work is kept either way - a rejection here means "this is not
     # good enough yet", not "throw it away". Main sees why and respawns,
     # usually with a different model or a sharper brief.
-    after = _check_outputs(skill, sk, merged_files, sdd)
+    after = _check_outputs(skill, sk, merged_files, sdd, ws)
     if after is not None:
         sdd = _record_reject(sdd, after)
         return Command(
@@ -225,7 +229,7 @@ def spawn(
 
 
 def _check_outputs(
-    skill: str, sk, files: dict[str, str], sdd: dict[str, Any]
+    skill: str, sk, files: dict[str, str], sdd: dict[str, Any], ws: Workspace
 ) -> gates.GateReject | None:
     """Gates that can only run once the sub-agent has produced something."""
     missing = [p for p in sk.outputs if p not in files]

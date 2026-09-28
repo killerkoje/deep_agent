@@ -15,6 +15,7 @@ from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
 from ..report import build_report
+from ..workspace import Workspace
 
 
 @tool
@@ -53,7 +54,9 @@ def finish(
         )
 
     sdd.update({"stage": "9-report", "last_event": "run.report.ready"})
+    ws = Workspace.for_thread(state.get("thread_id") or sdd.get("run_id") or "default")
     report = build_report({**state, "sdd": sdd, "status": "done"}, summary)
+    ws.write("report.md", report)
     return Command(
         update={
             "messages": [
@@ -62,7 +65,7 @@ def finish(
                     tool_call_id=tool_call_id,
                 )
             ],
-            "files": {**(state.get("files") or {}), "report.md": report},
+            "files": ws.index(),
             "sdd": sdd,
             "status": "done",
         }
@@ -82,11 +85,16 @@ def fail_run(
     return Command(
         update={
             "messages": [ToolMessage(f"run failed: {reason}", tool_call_id=tool_call_id)],
-            "files": {
-                **(state.get("files") or {}),
-                "report.md": build_report(state, f"FAILED: {reason}"),
-            },
+            "files": _write_report(state, sdd, f"FAILED: {reason}"),
             "sdd": sdd,
             "status": "error",
         }
     )
+
+
+def _write_report(state: dict, sdd: dict, summary: str) -> dict[str, str]:
+    """A failed run still leaves a report - one that vanishes without
+    saying why is the worst outcome."""
+    ws = Workspace.for_thread(state.get("thread_id") or sdd.get("run_id") or "default")
+    ws.write("report.md", build_report(state, summary))
+    return ws.index()

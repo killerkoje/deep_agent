@@ -91,7 +91,7 @@ class AgentState(TypedDict, total=False):
 
     # --- deep agent core ---
     todos: list[TodoItem]  # Planning  - re-injected every turn
-    files: Annotated[dict[str, str], merge_files]  # documents only
+    files: Annotated[dict[str, str], merge_files]  # INDEX: path -> sha256
 
     # --- execution control ---
     status: RunStatus
@@ -138,10 +138,17 @@ def initial_state(
     target_repo_path: str | None = None,
     max_iterations: int = 3,
 ) -> AgentState:
-    """A fresh run. `sources` are the human-supplied documents (stage 0)."""
-    files: dict[str, str] = {}
+    """A fresh run. `sources` are the human-supplied documents (stage 0).
+
+    They are written to disk immediately; state keeps only the index,
+    so a checkpoint never carries document bytes.
+    """
+    from .workspace import Workspace
+
+    ws = Workspace.for_thread(thread_id)
     for name, content in (sources or {}).items():
-        files[f"sources/{name}"] = content
+        ws.write(f"sources/{name}", content)
+    files = ws.index()
 
     return AgentState(
         messages=[],

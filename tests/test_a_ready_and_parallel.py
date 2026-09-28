@@ -121,13 +121,14 @@ def test_open_items_block_implement_end_to_end():
     original = P.route_sub
 
     def with_open_ready(decisions_md=P.DECISIONS_OK):
-        factory, box = original(decisions_md)
+        factory, _ = original(decisions_md)
         inner = P.writer("ready.md", READY_OPEN, "2 still open")
 
         def routed(_model_id=None):
-            return inner() if box["skill"] == "ready-audit" else factory(_model_id)
+            skill = P._CURRENT_SKILL.get()
+            return inner() if skill == "ready-audit" else factory(_model_id)
 
-        return routed, box
+        return routed, None
 
     P.route_sub = with_open_ready
     try:

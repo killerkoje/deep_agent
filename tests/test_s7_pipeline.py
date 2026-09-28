@@ -11,6 +11,8 @@ tried to wave through, finishing while a gate is still red.
 
 from __future__ import annotations
 
+import contextvars
+
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.types import Command as ResumeCommand
 
@@ -74,6 +76,13 @@ def writer(path: str, body: str, summary: str, extra: dict | None = None):
     return lambda _m=None: ScriptedChatModel(script, final_text=summary)
 
 
+# Which skill is spawning right now. A ContextVar rather than a plain
+# dict because ToolNode runs parallel tool calls in separate contexts:
+# with a shared variable, two concurrent spawns both read whichever
+# skill was written last and run the same sub-agent script.
+_CURRENT_SKILL: contextvars.ContextVar[str] = contextvars.ContextVar("skill")
+
+
 def route_sub(decisions_md=DECISIONS_OK):
     """Pick the scripted sub-agent by the skill currently spawning.
 
@@ -99,22 +108,20 @@ def route_sub(decisions_md=DECISIONS_OK):
         ),
     }
 
-    box = {"skill": None}
-
     def factory(_model_id=None):
-        return subs[box["skill"]]()
+        return subs[_CURRENT_SKILL.get()]()
 
-    return factory, box
+    return factory, None
 
 
 def run_pipeline(script, decisions_md=DECISIONS_OK, resume=None, **kw):
-    factory, box = route_sub(decisions_md)
+    factory, _ = route_sub(decisions_md)
 
     # remember which skill each spawn is for, so the right script runs
     real_spawn = spawn_mod.spawn.func
 
     def patched(skill, model, brief, state, tool_call_id):
-        box["skill"] = skill
+        _CURRENT_SKILL.set(skill)
         return real_spawn(skill, model, brief, state, tool_call_id)
 
     spawn_mod.spawn.func = patched
@@ -171,8 +178,10 @@ def test_full_pipeline_reaches_a_report():
 
 
 def test_report_records_skill_and_model_per_spawn():
+    from deep_agent.workspace import Workspace
+
     out, _, _ = run_pipeline(HAPPY, sources={"prd.md": "# PRD"})
-    report = out["files"]["report.md"]
+    report = Workspace.for_thread("th_pipe").read("report.md")
 
     assert "spec-write" in report and "gpt-6-sol" in report
     assert "Total:" in report

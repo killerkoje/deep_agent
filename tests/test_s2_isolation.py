@@ -74,8 +74,13 @@ def test_spawn_adds_exactly_one_message():
     assert SPEC_BODY not in blob  # the document body itself
     assert SUB_FINAL in blob  # only the summary came back
 
-    # it really did the work - the output landed in shared state
-    assert out["files"]["spec.md"] == SPEC_BODY
+    # it really did the work - the output landed in the workspace.
+    # State holds the index; the bytes are on disk, where git and
+    # Playwright can reach them.
+    from deep_agent.workspace import Workspace, sha256
+
+    assert out["files"]["spec.md"] == sha256(SPEC_BODY)
+    assert Workspace.for_thread("th_s2").read("spec.md") == SPEC_BODY
 
 
 def test_subagent_really_burned_many_turns():
@@ -83,13 +88,18 @@ def test_subagent_really_burned_many_turns():
     'exactly one parent message' would prove nothing."""
     from deep_agent.tools import fs
 
+    from deep_agent.workspace import Workspace
+
+    ws = Workspace.for_thread("th_burn")
+    ws.write("sources/prd.md", "# PRD")
     skill = skills_loader.load("spec-write")
+
     out = run_subagent(
         system_prompt=skill.prompt,
         brief="do it",
         model_id="gpt-6-sol",
         tools=fs.resolve(skill.tool_names),
-        files={"sources/prd.md": "# PRD"},
+        workdir=str(ws.stage_spawn("sp_test", skill.inputs)),
         model=sub_factory(),
     )
     assert len(out["transcript"]) >= 8

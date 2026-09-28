@@ -29,6 +29,7 @@ from .config import settings
 from .graph import build_graph
 from .models_catalog import spawnable_models
 from .state import initial_state
+from .workspace import Workspace
 
 app = FastAPI(title="Deep Agent Orchestrator", version="0.5.0")
 
@@ -143,10 +144,13 @@ def get_thread(thread_id: str, _: None = Depends(auth)) -> dict:
 
 @app.get("/api/v1/threads/{thread_id}/files/{name:path}")
 def get_file(thread_id: str, name: str, _: None = Depends(auth)) -> dict:
-    files = snapshot(thread_id).values.get("files") or {}
-    if name not in files:
+    index = snapshot(thread_id).values.get("files") or {}
+    if name not in index:
         raise HTTPException(404, f"no such file: {name}")
-    return {"path": name, "content": files[name]}
+    body = Workspace.for_thread(thread_id).read(name)
+    if body is None:
+        raise HTTPException(410, f"{name} is indexed but missing on disk")
+    return {"path": name, "content": body, "sha256": index[name]}
 
 
 @app.get("/api/v1/threads/{thread_id}/human-gate")
@@ -196,7 +200,8 @@ def answer_human_gate(
 
 @app.get("/api/v1/threads/{thread_id}/report")
 def get_report(thread_id: str, _: None = Depends(auth)) -> dict:
-    report = (snapshot(thread_id).values.get("files") or {}).get("report.md")
+    snapshot(thread_id)  # 404s on an unknown thread
+    report = Workspace.for_thread(thread_id).read("report.md")
     if not report:
         raise HTTPException(404, "no report yet")
     return {"report": report}
